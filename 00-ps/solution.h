@@ -22,3 +22,4 @@ void report_process(pid_t pid, const char *exe, char **argv, char **envp);
    a file or a directory.
 */
 void report_error(const char *path, int errno_code);
+
