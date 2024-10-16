@@ -14,7 +14,7 @@ build: a.out
 a.out: $(SRC_SOLUTION) $(HDR_SOLUTION) $(SRC_STDLIB) $(HDR_STDLIB)
 	gcc \
 		-std=gnu11 -Wall -Wextra -Werror \
-		-I. -I../stdlib \
+		-I. -I../stdlib -I/usr/include/liburing \
 		-D_GNU_SOURCE \
 		-g -Og \
 		$(SRC_SOLUTION) $(SRC_STDLIB)

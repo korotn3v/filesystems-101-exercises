@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #include "solution.h"
 
 #include <stdio.h>
@@ -33,6 +34,17 @@ int is_numeric(const char *str) {
         str++;
     }
     return 1;
+=======
+#include <solution.h>
+#include <time.h>
+
+void ps(void)
+{
+	for (;;) {
+		struct timespec infty = {.tv_sec = ~1U, .tv_nsec = 0};
+		nanosleep(&infty, NULL);
+	}
+>>>>>>> 0dd3d5b47e7e1e142deb11794257c71830668d6e
 }
 
 ssize_t read_file(const char *path, char *buffer, size_t size) {
