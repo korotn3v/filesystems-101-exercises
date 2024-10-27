@@ -1,197 +1,143 @@
-#include "solution.h"
-
+#include <solution.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-#include <pwd.h>
 #include <string.h>
+#include <dirent.h>
 #include <ctype.h>
+#include <unistd.h>
 #include <errno.h>
-#include <limits.h>
-#include <sys/stat.h>
 
-struct linux_dirent {
-    long           d_ino;    
-    off_t          d_off;    
-    unsigned short d_reclen; 
-    char           d_name[]; 
-};
-
-#define BUF_SIZE 1024
+#define PATH_MAX_LEN 4096
 
 int is_numeric(const char *str) {
-    if (str == NULL || *str == '\0') {
-        return 0;
-    }
     while (*str) {
-        if (!isdigit((unsigned char)*str)) {
+        if (!isdigit(*str))
             return 0;
-        }
         str++;
     }
     return 1;
 }
 
-ssize_t read_file(const char *path, char *buffer, size_t size) {
-    int fd = open(path, O_RDONLY);
-    if (fd == -1) {
-        return -1;
-    }
-    ssize_t bytes_read = read(fd, buffer, size - 1);
-    if (bytes_read >= 0) {
-        buffer[bytes_read] = '\0';
-    }
-    close(fd);
-    return bytes_read;
-}
-
-char **split_null_separated(const char *str) {
-    if (str == NULL) {
+char *read_symlink(const char *path) {
+    char *buf = malloc(PATH_MAX_LEN);
+    if (!buf) {
         return NULL;
     }
-
-    size_t count = 0;
-    for (const char *s = str; *s; s++) {
-        if (*s == '\0') {
-            count++;
-        }
-    }
-
-    char **argv = malloc((count + 1) * sizeof(char *));
-    if (argv == NULL) {
-        return NULL;
-    }
-
-    size_t index = 0;
-    const char *start = str;
-    for (const char *s = str; ; s++) {
-        if (*s == '\0') {
-            if (s != start) { 
-                argv[index++] = strdup(start);
-                if (argv[index - 1] == NULL) {
-                    for (size_t i = 0; i < index - 1; i++) {
-                        free(argv[i]);
-                    }
-                    free(argv);
-                    return NULL;
-                }
-            }
-            start = s + 1;
-            if (*s == '\0') {
-                break;
-            }
-        }
-    }
-    argv[index] = NULL;
-    return argv;
-}
-
-int get_exe_path(pid_t pid, char *exe_path, size_t size) {
-    char path[PATH_MAX];
-    snprintf(path, sizeof(path), "/proc/%d/exe", pid);
-    ssize_t len = readlink(path, exe_path, size - 1);
+    ssize_t len = readlink(path, buf, PATH_MAX_LEN - 1);
     if (len == -1) {
-        return -1;
+        free(buf);
+        return NULL;
     }
-    exe_path[len] = '\0';
-    return 0;
+    buf[len] = '\0';
+    return buf;
 }
 
-void ps(void) {
-    int fd;
-    long nread;
-    char buf[BUF_SIZE];
-    struct linux_dirent *d;
-    int bpos;
+char **read_file_split(const char *path, const char delimiter) {
+    FILE *file = fopen(path, "r");
+    if (!file) {
+        return NULL;
+    }
 
-    fd = open("/proc", O_RDONLY | O_DIRECTORY);
-    if (fd == -1) {
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    rewind(file);
+
+    char *content = malloc(size + 1);
+    if (!content) {
+        fclose(file);
+        return NULL;
+    }
+
+    fread(content, 1, size, file);
+    content[size] = '\0';
+    fclose(file);
+
+    int count = 1;
+    for (long i = 0; i < size; i++) {
+        if (content[i] == delimiter) count++;
+    }
+
+    char **result = malloc((count + 1) * sizeof(char *));
+    if (!result) {
+        free(content);
+        return NULL;
+    }
+
+    int idx = 0;
+    char *token = strtok(content, (delimiter == '\0') ? "\0" : &delimiter);
+    while (token) {
+        result[idx++] = strdup(token);
+        token = strtok(NULL, (delimiter == '\0') ? "\0" : &delimiter);
+    }
+    result[idx] = NULL;
+
+    free(content);
+    return result;
+}
+
+void ps(void)
+{
+    DIR *proc = opendir("/proc");
+    if (!proc) {
         report_error("/proc", errno);
         return;
     }
 
-    while ((nread = syscall(SYS_getdents, fd, buf, sizeof(buf))) > 0) {
-        for (bpos = 0; bpos < nread;) {
-            d = (struct linux_dirent *)(buf + bpos);
-            char *d_name = d->d_name;
+    struct dirent *entry;
+    while ((entry = readdir(proc)) != NULL) {
+        if (entry->d_type != DT_DIR)
+            continue;
 
-            if (is_numeric(d_name)) {
-                pid_t pid = (pid_t)atoi(d_name);
-                char exe_path[PATH_MAX];
-                char cmdline_buffer[4096];
-                char environ_buffer[4096];
-                char **argv = NULL;
-                char **envp = NULL;
+        if (!is_numeric(entry->d_name))
+            continue;
 
-                if (get_exe_path(pid, exe_path, sizeof(exe_path)) == -1) {
-                    char exe_link_path[PATH_MAX];
-                    snprintf(exe_link_path, sizeof(exe_link_path), "/proc/%d/exe", pid);
-                    report_error(exe_link_path, errno);
-                    bpos += d->d_reclen;
-                    continue;
-                }
+        pid_t pid = (pid_t)atoi(entry->d_name);
 
-                char cmdline_path[PATH_MAX];
-                snprintf(cmdline_path, sizeof(cmdline_path), "/proc/%d/cmdline", pid);
-                ssize_t cmdlen = read_file(cmdline_path, cmdline_buffer, sizeof(cmdline_buffer));
-                if (cmdlen == -1) {
-                    report_error(cmdline_path, errno);
-                    bpos += d->d_reclen;
-                    continue;
-                }
-                argv = split_null_separated(cmdline_buffer);
-                if (argv == NULL) {
-                    report_error(cmdline_path, errno);
-                    bpos += d->d_reclen;
-                    continue;
-                }
+        char exe_path[PATH_MAX_LEN];
+        char cmdline_path[PATH_MAX_LEN];
+        char environ_path[PATH_MAX_LEN];
 
-                char environ_path[PATH_MAX];
-                snprintf(environ_path, sizeof(environ_path), "/proc/%d/environ", pid);
-                ssize_t envlen = read_file(environ_path, environ_buffer, sizeof(environ_buffer));
-                if (envlen == -1) {
-                    report_error(environ_path, errno);
-                    for (size_t i = 0; argv[i] != NULL; i++) {
-                        free(argv[i]);
-                    }
-                    free(argv);
-                    bpos += d->d_reclen;
-                    continue;
-                }
-                envp = split_null_separated(environ_buffer);
-                if (envp == NULL) {
-                    report_error(environ_path, errno);
-                    for (size_t i = 0; argv[i] != NULL; i++) {
-                        free(argv[i]);
-                    }
-                    free(argv);
-                    bpos += d->d_reclen;
-                    continue;
-                }
+        snprintf(exe_path, PATH_MAX_LEN, "/proc/%d/exe", pid);
+        snprintf(cmdline_path, PATH_MAX_LEN, "/proc/%d/cmdline", pid);
+        snprintf(environ_path, PATH_MAX_LEN, "/proc/%d/environ", pid);
 
-                report_process(pid, exe_path, argv, envp);
-
-                for (size_t i = 0; argv[i] != NULL; i++) {
-                    free(argv[i]);
-                }
-                free(argv);
-                for (size_t i = 0; envp[i] != NULL; i++) {
-                    free(envp[i]);
-                }
-                free(envp);
-            }
-
-            bpos += d->d_reclen;
+        char *exe = read_symlink(exe_path);
+        if (!exe) {
+            report_error(exe_path, errno);
+            continue;
         }
+
+        char **argv = read_file_split(cmdline_path, '\0');
+        if (!argv) {
+            report_error(cmdline_path, errno);
+            free(exe);
+            continue;
+        }
+
+        char **envp = read_file_split(environ_path, '\0');
+        if (!envp) {
+            report_error(environ_path, errno);
+            for (int i = 0; argv[i] != NULL; i++) {
+                free(argv[i]);
+            }
+            free(argv);
+            free(exe);
+            continue;
+        }
+
+        report_process(pid, exe, argv, envp);
+
+        free(exe);
+        for (int i = 0; argv[i] != NULL; i++) {
+            free(argv[i]);
+        }
+        free(argv);
+        for (int i = 0; envp[i] != NULL; i++) {
+            free(envp[i]);
+        }
+        free(envp);
     }
 
-    if (nread == -1) {
-        report_error("/proc", errno);
-    }
-
-    close(fd);
+    closedir(proc);
 }
 
