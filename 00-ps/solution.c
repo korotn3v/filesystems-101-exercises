@@ -33,6 +33,7 @@ int is_numeric(const char *str) {
         str++;
     }
     return 1;
+}
 
 ssize_t read_file(const char *path, char *buffer, size_t size) {
     int fd = open(path, O_RDONLY);
