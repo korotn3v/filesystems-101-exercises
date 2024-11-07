@@ -27,7 +27,7 @@ void ps(void){
         }
 
         char buf_exe[PATH_MAX];
-        char cur_path[PATH_MAX];
+        char cur_path[128];
         char *read_argv = malloc(BUFFER_SIZE + 1);
         char *read_envp = malloc(BUFFER_SIZE + 1);
         char **buf_argv = NULL;
@@ -76,13 +76,13 @@ void ps(void){
         read_argv[bytes_read_cmdline] = '\0';
 
         //count nuber of strings
-        size_t count = 0;
+        size_t number_strings_argv = 0;
         for (size_t i = 0; i < (size_t)bytes_read_cmdline; i++){
             if (read_argv[i] == '\0')
-                count++;
+                number_strings_argv++;
         }
 
-        buf_argv = malloc((count + 1) * sizeof(char *));
+        buf_argv = malloc((number_strings_argv + 1) * sizeof(char *));
         if(!buf_argv){
             report_error(cur_path, ENOMEM);
             free(read_argv);
@@ -91,13 +91,14 @@ void ps(void){
         }
 
         //parse arv_read into arv_buf
-        count = 0;
+        size_t count_argv = 0;
         char *ptr_argv = read_argv;
-        while (*ptr_argv && count < BUFFER_SIZE / sizeof(char *) - 1){
-            buf_argv[count++] = ptr_argv;
+        while (*ptr_argv && count_argv < (number_strings_argv + 1)){
+            buf_argv[count_argv] = ptr_argv;
+            count_argv++;
             ptr_argv += strlen(ptr_argv) + 1;
         }
-        buf_argv[count] = NULL;
+        buf_argv[count_argv] = NULL;
 
         //read into env_read
         snprintf(cur_path, sizeof(cur_path), "/proc/%d/environ", pid);
@@ -126,13 +127,13 @@ void ps(void){
         read_argv[bytes_read_envp] = '\0';
 
         //count nuber of strings
-        count = 0;
+        size_t number_strings_envp = 0;
         for (size_t i = 0; i < (size_t)(bytes_read_envp); i++){
             if (read_envp[i] == '\0')
-                count++;
+                number_strings_envp++;
         }
 
-        buf_envp = malloc((count + 1) * sizeof(char *));
+        buf_envp = malloc((number_strings_envp + 1) * sizeof(char *));
         if(!buf_envp){
             report_error(cur_path, ENOMEM);
             free(read_argv);
@@ -142,13 +143,14 @@ void ps(void){
         }
 
         //parse read_envp into buf_envp
-        count = 0;
+        size_t count_envp = 0;
         char *ptr_envp = read_envp;
-        while (*ptr_envp && count < BUFFER_SIZE / sizeof(char *) - 1){
-            buf_envp[count++] = ptr_envp;
+        while (*ptr_envp && count_envp < (number_strings_envp + 1)){
+            buf_envp[count_envp] = ptr_envp;
+            count_envp++;
             ptr_envp += strlen(ptr_envp) + 1;
         }
-        buf_envp[count] = NULL;
+        buf_envp[count_envp] = NULL;
 
         //report process
         report_process(pid, buf_exe, buf_argv, buf_envp);
