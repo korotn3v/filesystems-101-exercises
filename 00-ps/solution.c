@@ -1,143 +1,161 @@
 #include <solution.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <dirent.h>
-#include <ctype.h>
-#include <unistd.h>
+#include <string.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <string.h>
 
-#define PATH_MAX_LEN 4096
+#define BUFFER_SIZE 65536
 
-int is_numeric(const char *str) {
-    while (*str) {
-        if (!isdigit(*str))
-            return 0;
-        str++;
-    }
-    return 1;
+void ps(void){
+
+	DIR *proc_dir = opendir("/proc");
+	if (!proc_dir){
+		report_error("/proc", ENOENT);
+		return;
+	}
+
+	struct dirent *cur_dir;
+	while ((cur_dir = readdir(proc_dir))){
+
+        if (!isdigit(cur_dir->d_name[0])){
+            continue;
+        }
+
+        char exe_buf[PATH_MAX];
+        char cur_path[PATH_MAX];
+        char *argv_read = malloc(BUFFER_SIZE + 1);
+        char *envp_read = malloc(BUFFER_SIZE + 1);
+        char **argv_buf = NULL;
+        char **envp_buf = NULL;
+
+        if (!argv_read || !envp_read){
+            report_error("/proc", ENOMEM);
+            exit(EXIT_FAILURE);
+        }
+
+        //read into exe_buf
+        pid_t pid = atoi(cur_dir->d_name);
+        snprintf(cur_path, sizeof(cur_path), "/proc/%d/exe", pid);
+        ssize_t exe_len = readlink(cur_path, exe_buf, PATH_MAX);
+
+        if (exe_len == -1){
+            report_error(cur_path, errno);
+            free(argv_read);
+            free(envp_read);
+            continue;
+        }
+        exe_buf[exe_len] = '\0';
+
+        //read into arg_read
+        snprintf(cur_path, sizeof(cur_path), "/proc/%d/cmdline", pid);
+        FILE *file_cmdline = fopen(cur_path, "r");
+
+        if (!file_cmdline){
+            if (errno != EACCES)
+                report_error(cur_path, errno);
+            free(argv_read);
+            free(envp_read);
+            continue;
+        }
+
+        ssize_t bytes_read_cmdline = fread(argv_read, 1, BUFFER_SIZE - 1, file_cmdline);
+        fclose(file_cmdline);
+
+        if (bytes_read_cmdline == -1)
+        {
+            report_error(cur_path, errno);
+            free(argv_read);
+            free(envp_read);
+            continue;
+        }
+        argv_read[bytes_read_cmdline] = '\0';
+
+        //count nuber of strings
+        size_t count = 0;
+        for (size_t i = 0; i < (size_t)bytes_read_cmdline; i++){
+            if (argv_read[i] == '\0')
+                count++;
+        }
+
+        argv_buf = malloc((count + 1) * sizeof(char *));
+        if(!argv_buf){
+            report_error(cur_path, ENOMEM);
+            free(argv_read);
+            free(envp_read);
+            exit(EXIT_FAILURE);
+        }
+
+        //parse arv_read into arv_buf
+        count = 0;
+        char *ptr_argv = argv_read;
+        while (*ptr_argv && count < BUFFER_SIZE / sizeof(char *) - 1){
+            argv_buf[count++] = ptr_argv;
+            ptr_argv += strlen(ptr_argv) + 1;
+        }
+        argv_buf[count] = NULL;
+
+        //read into env_read
+        snprintf(cur_path, sizeof(cur_path), "/proc/%d/environ", pid);
+        FILE *file_env = fopen(cur_path, "r");
+
+        if (!file_env){
+            if (errno != EACCES)
+                report_error(cur_path, errno);
+            free(argv_read);
+            free(envp_read);
+            free(argv_buf);
+            continue;
+        }
+
+        ssize_t bytes_read_envp = fread(envp_read, 1, BUFFER_SIZE - 1, file_env);
+        fclose(file_env);
+
+        if (bytes_read_envp == -1)
+        {
+            report_error(cur_path, errno);
+            free(argv_read);
+            free(envp_read);
+            free(argv_buf);
+            continue;
+        }
+        argv_read[bytes_read_envp] = '\0';
+
+        //count nuber of strings
+        count = 0;
+        for (size_t i = 0; i < (size_t)(bytes_read_envp); i++){
+            if (envp_read[i] == '\0')
+                count++;
+        }
+
+        envp_buf = malloc((count + 1) * sizeof(char *));
+        if(!envp_buf){
+            report_error(cur_path, ENOMEM);
+            free(argv_read);
+            free(envp_read);
+            free(argv_buf);
+            exit(EXIT_FAILURE);
+        }
+
+        //parse envp_read into envp_buf
+        count = 0;
+        char *ptr_envp = envp_read;
+        while (*ptr_envp && count < BUFFER_SIZE / sizeof(char *) - 1){
+            envp_buf[count++] = ptr_envp;
+            ptr_envp += strlen(ptr_envp) + 1;
+        }
+        envp_buf[count] = NULL;
+
+        //report process
+        report_process(pid, exe_buf, argv_buf, envp_buf);
+        free(argv_buf);
+        free(envp_buf);
+        free(argv_read);
+        free(envp_read);
+	}
+	closedir(proc_dir);
 }
-
-char *read_symlink(const char *path) {
-    char *buf = malloc(PATH_MAX_LEN);
-    if (!buf) {
-        return NULL;
-    }
-    ssize_t len = readlink(path, buf, PATH_MAX_LEN - 1);
-    if (len == -1) {
-        free(buf);
-        return NULL;
-    }
-    buf[len] = '\0';
-    return buf;
-}
-
-char **read_file_split(const char *path, const char delimiter) {
-    FILE *file = fopen(path, "r");
-    if (!file) {
-        return NULL;
-    }
-
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    rewind(file);
-
-    char *content = malloc(size + 1);
-    if (!content) {
-        fclose(file);
-        return NULL;
-    }
-
-    fread(content, 1, size, file);
-    content[size] = '\0';
-    fclose(file);
-
-    int count = 1;
-    for (long i = 0; i < size; i++) {
-        if (content[i] == delimiter) count++;
-    }
-
-    char **result = malloc((count + 1) * sizeof(char *));
-    if (!result) {
-        free(content);
-        return NULL;
-    }
-
-    int idx = 0;
-    char *token = strtok(content, (delimiter == '\0') ? "\0" : &delimiter);
-    while (token) {
-        result[idx++] = strdup(token);
-        token = strtok(NULL, (delimiter == '\0') ? "\0" : &delimiter);
-    }
-    result[idx] = NULL;
-
-    free(content);
-    return result;
-}
-
-void ps(void)
-{
-    DIR *proc = opendir("/proc");
-    if (!proc) {
-        report_error("/proc", errno);
-        return;
-    }
-
-    struct dirent *entry;
-    while ((entry = readdir(proc)) != NULL) {
-        if (entry->d_type != DT_DIR)
-            continue;
-
-        if (!is_numeric(entry->d_name))
-            continue;
-
-        pid_t pid = (pid_t)atoi(entry->d_name);
-
-        char exe_path[PATH_MAX_LEN];
-        char cmdline_path[PATH_MAX_LEN];
-        char environ_path[PATH_MAX_LEN];
-
-        snprintf(exe_path, PATH_MAX_LEN, "/proc/%d/exe", pid);
-        snprintf(cmdline_path, PATH_MAX_LEN, "/proc/%d/cmdline", pid);
-        snprintf(environ_path, PATH_MAX_LEN, "/proc/%d/environ", pid);
-
-        char *exe = read_symlink(exe_path);
-        if (!exe) {
-            report_error(exe_path, errno);
-            continue;
-        }
-
-        char **argv = read_file_split(cmdline_path, '\0');
-        if (!argv) {
-            report_error(cmdline_path, errno);
-            free(exe);
-            continue;
-        }
-
-        char **envp = read_file_split(environ_path, '\0');
-        if (!envp) {
-            report_error(environ_path, errno);
-            for (int i = 0; argv[i] != NULL; i++) {
-                free(argv[i]);
-            }
-            free(argv);
-            free(exe);
-            continue;
-        }
-
-        report_process(pid, exe, argv, envp);
-
-        free(exe);
-        for (int i = 0; argv[i] != NULL; i++) {
-            free(argv[i]);
-        }
-        free(argv);
-        for (int i = 0; envp[i] != NULL; i++) {
-            free(envp[i]);
-        }
-        free(envp);
-    }
-
-    closedir(proc);
-}
-
