@@ -9,7 +9,7 @@
 #include <ctype.h>
 #include <string.h>
 
-#define BUFFER_SIZE 65536
+#define BUFFER_SIZE 1024 * 1024
 
 void ps(void){
 
@@ -26,30 +26,30 @@ void ps(void){
             continue;
         }
 
-        char exe_buf[PATH_MAX];
+        char buf_exe[PATH_MAX];
         char cur_path[PATH_MAX];
-        char *argv_read = malloc(BUFFER_SIZE + 1);
-        char *envp_read = malloc(BUFFER_SIZE + 1);
-        char **argv_buf = NULL;
-        char **envp_buf = NULL;
+        char *read_argv = malloc(BUFFER_SIZE + 1);
+        char *read_envp = malloc(BUFFER_SIZE + 1);
+        char **buf_argv = NULL;
+        char **buf_envp = NULL;
 
-        if (!argv_read || !envp_read){
+        if (!read_argv || !read_envp){
             report_error("/proc", ENOMEM);
             exit(EXIT_FAILURE);
         }
 
-        //read into exe_buf
+        //read into buf_exe
         pid_t pid = atoi(cur_dir->d_name);
         snprintf(cur_path, sizeof(cur_path), "/proc/%d/exe", pid);
-        ssize_t exe_len = readlink(cur_path, exe_buf, PATH_MAX);
+        ssize_t exe_len = readlink(cur_path, buf_exe, PATH_MAX);
 
         if (exe_len == -1){
             report_error(cur_path, errno);
-            free(argv_read);
-            free(envp_read);
+            free(read_argv);
+            free(read_envp);
             continue;
         }
-        exe_buf[exe_len] = '\0';
+        buf_exe[exe_len] = '\0';
 
         //read into arg_read
         snprintf(cur_path, sizeof(cur_path), "/proc/%d/cmdline", pid);
@@ -58,46 +58,46 @@ void ps(void){
         if (!file_cmdline){
             if (errno != EACCES)
                 report_error(cur_path, errno);
-            free(argv_read);
-            free(envp_read);
+            free(read_argv);
+            free(read_envp);
             continue;
         }
 
-        ssize_t bytes_read_cmdline = fread(argv_read, 1, BUFFER_SIZE - 1, file_cmdline);
+        ssize_t bytes_read_cmdline = fread(read_argv, 1, BUFFER_SIZE - 1, file_cmdline);
         fclose(file_cmdline);
 
         if (bytes_read_cmdline == -1)
         {
             report_error(cur_path, errno);
-            free(argv_read);
-            free(envp_read);
+            free(read_argv);
+            free(read_envp);
             continue;
         }
-        argv_read[bytes_read_cmdline] = '\0';
+        read_argv[bytes_read_cmdline] = '\0';
 
         //count nuber of strings
         size_t count = 0;
         for (size_t i = 0; i < (size_t)bytes_read_cmdline; i++){
-            if (argv_read[i] == '\0')
+            if (read_argv[i] == '\0')
                 count++;
         }
 
-        argv_buf = malloc((count + 1) * sizeof(char *));
-        if(!argv_buf){
+        buf_argv = malloc((count + 1) * sizeof(char *));
+        if(!buf_argv){
             report_error(cur_path, ENOMEM);
-            free(argv_read);
-            free(envp_read);
+            free(read_argv);
+            free(read_envp);
             exit(EXIT_FAILURE);
         }
 
         //parse arv_read into arv_buf
         count = 0;
-        char *ptr_argv = argv_read;
+        char *ptr_argv = read_argv;
         while (*ptr_argv && count < BUFFER_SIZE / sizeof(char *) - 1){
-            argv_buf[count++] = ptr_argv;
+            buf_argv[count++] = ptr_argv;
             ptr_argv += strlen(ptr_argv) + 1;
         }
-        argv_buf[count] = NULL;
+        buf_argv[count] = NULL;
 
         //read into env_read
         snprintf(cur_path, sizeof(cur_path), "/proc/%d/environ", pid);
@@ -106,56 +106,56 @@ void ps(void){
         if (!file_env){
             if (errno != EACCES)
                 report_error(cur_path, errno);
-            free(argv_read);
-            free(envp_read);
-            free(argv_buf);
+            free(read_argv);
+            free(read_envp);
+            free(buf_argv);
             continue;
         }
 
-        ssize_t bytes_read_envp = fread(envp_read, 1, BUFFER_SIZE - 1, file_env);
+        ssize_t bytes_read_envp = fread(read_envp, 1, BUFFER_SIZE - 1, file_env);
         fclose(file_env);
 
         if (bytes_read_envp == -1)
         {
             report_error(cur_path, errno);
-            free(argv_read);
-            free(envp_read);
-            free(argv_buf);
+            free(read_argv);
+            free(read_envp);
+            free(buf_argv);
             continue;
         }
-        argv_read[bytes_read_envp] = '\0';
+        read_argv[bytes_read_envp] = '\0';
 
         //count nuber of strings
         count = 0;
         for (size_t i = 0; i < (size_t)(bytes_read_envp); i++){
-            if (envp_read[i] == '\0')
+            if (read_envp[i] == '\0')
                 count++;
         }
 
-        envp_buf = malloc((count + 1) * sizeof(char *));
-        if(!envp_buf){
+        buf_envp = malloc((count + 1) * sizeof(char *));
+        if(!buf_envp){
             report_error(cur_path, ENOMEM);
-            free(argv_read);
-            free(envp_read);
-            free(argv_buf);
+            free(read_argv);
+            free(read_envp);
+            free(buf_argv);
             exit(EXIT_FAILURE);
         }
 
-        //parse envp_read into envp_buf
+        //parse read_envp into buf_envp
         count = 0;
-        char *ptr_envp = envp_read;
+        char *ptr_envp = read_envp;
         while (*ptr_envp && count < BUFFER_SIZE / sizeof(char *) - 1){
-            envp_buf[count++] = ptr_envp;
+            buf_envp[count++] = ptr_envp;
             ptr_envp += strlen(ptr_envp) + 1;
         }
-        envp_buf[count] = NULL;
+        buf_envp[count] = NULL;
 
         //report process
-        report_process(pid, exe_buf, argv_buf, envp_buf);
-        free(argv_buf);
-        free(envp_buf);
-        free(argv_read);
-        free(envp_read);
+        report_process(pid, buf_exe, buf_argv, buf_envp);
+        free(buf_argv);
+        free(buf_envp);
+        free(read_argv);
+        free(read_envp);
 	}
 	closedir(proc_dir);
 }
