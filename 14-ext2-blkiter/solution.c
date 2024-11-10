@@ -108,8 +108,8 @@ int ext2_blkiter_next(struct ext2_blkiter *i, int *blkno)
             if (pread(i->fs->fd, i->indirect_block, i->fs->block_size, i->inode.i_block[EXT2_IND_BLOCK] * i->fs->block_size) == -1) {
                 return -errno;
             }
-            *blkno = i->inode.i_block[EXT2_IND_BLOCK];
-            return 1;
+//            *blkno = i->inode.i_block[EXT2_IND_BLOCK];
+//            return 1;
         }
 
         if (i->indirect_block[i->current - indirect_start] == 0) {
