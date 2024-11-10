@@ -133,9 +133,9 @@ int ext2_blkiter_next(struct ext2_blkiter *i, int *blkno)
 
         int indirect_pos = (i->current - double_indirect_start) / ptrs_per_block;
         int double_indirect_pos = (i->current - double_indirect_start) % ptrs_per_block;
+        int block_offset = i->double_indirect_block[indirect_pos] * i->fs->block_size;
 
-        if (!i->indirect_block || i->indirect_block != (int *)fs_xmalloc(i->fs->block_size)){
-            int block_offset = i->double_indirect_block[indirect_pos] * i->fs->block_size;
+        if (i->indirect_block != (int *)block_offset){
             if (pread(i->fs->fd, i->indirect_block, i->fs->block_size, block_offset) == -1){
                 return -errno;
             }
