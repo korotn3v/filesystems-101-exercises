@@ -24,6 +24,7 @@ struct ext2_blkiter
 
 	int *indirect_block;
 	int *double_indirect_block;
+	int current_indirect_block_num;
 };
 
 int ext2_fs_init(struct ext2_fs **fs, int fd)
@@ -77,6 +78,7 @@ int ext2_blkiter_init(struct ext2_blkiter **i, struct ext2_fs *fs, int ino)
 
     i_temp->indirect_block = NULL;
     i_temp->double_indirect_block = NULL;
+    i_temp->current_indirect_block_num = -1;
 
     return 0;
 }
@@ -135,7 +137,8 @@ int ext2_blkiter_next(struct ext2_blkiter *i, int *blkno)
         int double_indirect_pos = (i->current - double_indirect_start) % ptrs_per_block;
         int block_offset = i->double_indirect_block[indirect_pos] * i->fs->block_size;
 
-        if (i->indirect_block != (int *)block_offset){
+        if (i->current_indirect_block_num != i->double_indirect_block[indirect_pos]){
+            i->current_indirect_block_num = i->double_indirect_block[indirect_pos];
             if (pread(i->fs->fd, i->indirect_block, i->fs->block_size, block_offset) == -1){
                 return -errno;
             }
