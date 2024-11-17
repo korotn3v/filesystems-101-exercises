@@ -13,48 +13,48 @@
 //    printf("Inode: %d, Type: %c, Name: %s\n", inode_nr, type, name);
 //}
 
-int read_block(int img, int* buffer, int* left_to_copy, int block_size, int block){
+int read_block(int img, int* buffer, int* left_to_copy, int block_size, int block) {
     if (pread(img, buffer, block_size, block_size * block) < block_size) {
         fprintf(stderr, "cant read from img (block %d)\n", block);
         return -errno;
     }
 
-    int size_to_write = (block_size < *left_to_copy) ? block_size : *left_to_copy;
-    *left_to_copy -= size_to_write;
-
-    struct ext2_dir_entry_2* entry = (struct ext2_dir_entry_2*) (buffer);
-    char name[EXT2_NAME_LEN];
+    int size_to_process = (*left_to_copy < block_size) ? *left_to_copy : block_size;
+    *left_to_copy -= size_to_process;
     int shift = 0;
 
-    while (entry->inode != 0 && size_to_write > 0) {
+    struct ext2_dir_entry_2* entry = (struct ext2_dir_entry_2*) buffer;
 
-        memcpy(name, entry->name, EXT2_NAME_LEN);
+    while (size_to_process > 0 && shift < block_size && entry->inode != 0) {
+        if (entry->rec_len < sizeof(struct ext2_dir_entry_2) || entry->rec_len + shift > block_size) {
+            fprintf(stderr, "bad catalog\n");
+            return -EINVAL;
+        }
+
+        char name[EXT2_NAME_LEN + 1] = {0};
+        memcpy(name, entry->name, entry->name_len);
         name[entry->name_len] = '\0';
 
+        char type = '?';
         if (entry->file_type == EXT2_FT_DIR) {
-            report_file(entry->inode, 'd', name);
-        }
-        if (entry->file_type == EXT2_FT_REG_FILE) {
-            report_file(entry->inode, 'f', name);
-        }
-
-        if (shift + entry->rec_len > block_size) {
-            break;
-        }
-        if (entry->rec_len < sizeof(struct ext2_dir_entry_2)) {
-            break;
-        }
-        shift += entry->rec_len;
-        size_to_write -= entry->rec_len;
-
-        if (block_size <= shift) {
-            break;
+            type = 'd';
+        } else if (entry->file_type == EXT2_FT_REG_FILE) {
+            type = 'f';
         } else {
-            entry = (struct ext2_dir_entry_2*)((char*)buffer + shift);
+            fprintf(stderr, "Unknown file type: %d\n", entry->file_type);
+            return -EINVAL;
         }
+
+        report_file(entry->inode, type, name);
+
+        shift += entry->rec_len;
+        entry = (struct ext2_dir_entry_2*)((char*)buffer + shift);
+        size_to_process -= entry->rec_len;
     }
+
     return 1;
 }
+
 
 int dump_dir(int img, int inode_nr)
 {
