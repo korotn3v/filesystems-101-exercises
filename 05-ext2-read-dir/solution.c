@@ -41,6 +41,9 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
         if (shift + entry->rec_len > block_size) {
             break;
         }
+        if (entry->rec_len < sizeof(struct ext2_dir_entry_2)) {
+            break;
+        }
         shift += entry->rec_len;
         size_to_write -= entry->rec_len;
 
