@@ -9,9 +9,9 @@
 #include <errno.h>
 #include <unistd.h>
 
-void report_file(int inode_nr, char type, const char *name){
-    printf("Inode: %d, Type: %c, Name: %s\n", inode_nr, type, name);
-}
+//void report_file(int inode_nr, char type, const char *name){
+//    printf("Inode: %d, Type: %c, Name: %s\n", inode_nr, type, name);
+//}
 
 int read_block(int img, int* buffer, int* left_to_copy, int block_size, int block) {
     if (pread(img, buffer, block_size, block_size * block) < block_size) {
