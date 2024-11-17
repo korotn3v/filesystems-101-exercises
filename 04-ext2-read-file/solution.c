@@ -11,7 +11,7 @@
 
 int read_block(int img, int* buffer, int* left_to_copy, int block_size, int block, int out){
     if (pread(img, buffer, block_size, block_size * block) < block_size) {
-        fprintf(stderr, "cant read from img\n");
+        fprintf(stderr, "cant read from img (block %d)\n", block);
         return -errno;
     }
 
@@ -22,7 +22,7 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
         return -errno;
     } else {
         *left_to_copy -= size_to_write;
-        fprintf(stderr, "Reading %d bytes from inode block %d\n", *left_to_copy, *buffer);
+        fprintf(stderr, "Reading %d bytes from block %d\n", size_to_write, block);
         return 1;
     }
 }
@@ -71,7 +71,7 @@ int dump_file(int img, int inode_nr, int out)
             }
         }
 
-        if(i < EXT2_DIND_BLOCK){
+        if(i == EXT2_IND_BLOCK && inode.i_block[i] != 0){
             if (pread(img, direct_block, block_size, block_size * inode.i_block[i]) < block_size) {
                 free(direct_block);
                 return -errno;
@@ -92,7 +92,7 @@ int dump_file(int img, int inode_nr, int out)
             }
         }
 
-        if(i < EXT2_TIND_BLOCK){
+        if(i == EXT2_DIND_BLOCK){
             if (pread(img, direct_block, block_size, block_size * inode.i_block[i]) < block_size) {
                 free(direct_block);
                 free(indirect_block);
