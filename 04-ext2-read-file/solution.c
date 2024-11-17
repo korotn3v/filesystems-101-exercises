@@ -11,15 +11,18 @@
 
 int read_block(int img, int* buffer, int* left_to_copy, int block_size, int block, int out){
     if (pread(img, buffer, block_size, block_size * block) < block_size) {
+        printf("cant read from img\n");
         return -errno;
     }
 
     int size_to_write = (block_size < *left_to_copy) ? block_size : *left_to_copy;
 
     if (write(out, buffer, size_to_write) < size_to_write) {
+        printf("cant write %d bytes to out\n", size_to_write);
         return -errno;
     } else {
         *left_to_copy -= size_to_write;
+        printf("Reading %d bytes from inode block %d\n", *left_to_copy, *buffer);
         return 1;
     }
 }
@@ -29,6 +32,7 @@ int dump_file(int img, int inode_nr, int out)
 	struct ext2_super_block super_block;
     int read_sb = pread(img, &super_block, SUPERBLOCK_SIZE, SUPERBLOCK_OFFSET);
     if (read_sb < 0) {
+        printf("cant read superblock from img\n");
         return -errno;
     }
 
@@ -39,12 +43,14 @@ int dump_file(int img, int inode_nr, int out)
     struct ext2_group_desc group_desc;
     int read_group_desc = pread(img, &group_desc, sizeof(group_desc), block_size * (super_block.s_first_data_block + 1) + sizeof(group_desc) * group_id);
     if (read_group_desc < 0) {
+        printf("cant read group_desc from img\n");
         return -errno;
     }
 
     struct ext2_inode inode;
     int read_inode = pread(img, &inode, sizeof(inode), block_size * group_desc.bg_inode_table + super_block.s_inode_size * inode_id);
     if (read_inode < 0) {
+        printf("cant read inode from img\n");
         return -errno;
     }
 
