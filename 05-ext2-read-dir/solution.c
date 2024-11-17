@@ -9,9 +9,9 @@
 #include <errno.h>
 #include <unistd.h>
 
-//void report_file(int inode_nr, char type, const char *name){
-//    printf("Inode: %d, Type: %c, Name: %s\n", inode_nr, type, name);
-//}
+void report_file(int inode_nr, char type, const char *name){
+    printf("Inode: %d, Type: %c, Name: %s\n", inode_nr, type, name);
+}
 
 int read_block(int img, int* buffer, int* left_to_copy, int block_size, int block) {
     if (pread(img, buffer, block_size, block_size * block) < block_size) {
@@ -23,10 +23,14 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
     *left_to_copy -= size_to_process;
     int shift = 0;
 
-    struct ext2_dir_entry_2* entry = (struct ext2_dir_entry_2*) buffer;
+    while (shift < size_to_process) {
+        struct ext2_dir_entry_2* entry = (struct ext2_dir_entry_2*)((char*)buffer + shift);
 
-    while (size_to_process > 0 && shift < block_size && entry->inode != 0) {
-        if (entry->rec_len < sizeof(struct ext2_dir_entry_2) || entry->rec_len + shift > block_size) {
+        if (entry->inode == 0) {
+            break;
+        }
+
+        if (entry->rec_len == 0 || shift + entry->rec_len > block_size) {
             fprintf(stderr, "bad catalog: invalid rec_len in entry (inode: %d, rec_len: %d)\n", entry->inode, entry->rec_len);
             return -EINVAL;
         }
@@ -48,11 +52,9 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
         report_file(entry->inode, type, name);
 
         shift += entry->rec_len;
-        entry = (struct ext2_dir_entry_2*)((char*)buffer + shift);
-        size_to_process -= entry->rec_len;
     }
 
-    return 1;
+    return 0;
 }
 
 
