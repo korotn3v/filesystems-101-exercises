@@ -29,7 +29,7 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
 
     while (flag == 1 && entry->inode != 0 && size_to_write > 0) {
 
-        strncpy(name, entry->name, EXT2_NAME_LEN);
+        memcpy(name, entry->name, EXT2_NAME_LEN);
         name[entry->name_len] = '\0';
 
         if (entry->file_type == EXT2_FT_DIR) {
