@@ -43,12 +43,14 @@ int dump_file(int img, int inode_nr, int out)
 
         if(i < EXT2_NDIR_BLOCKS){
             if (pread(img, direct_block, block_size, block_size * inode.i_block[i]) < block_size) {
+                free(direct_block);
                 return -errno;
             }
 
             int size_to_write = (block_size < left_to_copy) ? block_size : left_to_copy;
 
             if (write(out, direct_block, size_to_write) < size_to_write) {
+                free(direct_block);
                 return -errno;
             } else {
                 left_to_copy -= size_to_write;
@@ -57,6 +59,7 @@ int dump_file(int img, int inode_nr, int out)
 
         if(i < EXT2_DIND_BLOCK){
             if (pread(img, direct_block, block_size, block_size * inode.i_block[i]) < block_size) {
+                free(direct_block);
                 return -errno;
             }
             if(!indirect_block){
@@ -66,12 +69,16 @@ int dump_file(int img, int inode_nr, int out)
             int k = 0;
             while (k < (block_size / (int)sizeof(int)) && left_to_copy > 0 && direct_block[k] != 0){
                 if (pread(img, indirect_block, block_size, block_size * direct_block[k]) < block_size) {
+                    free(direct_block);
+                    free(indirect_block);
                     return -errno;
                 }
 
                 int size_to_write = (block_size < left_to_copy) ? block_size : left_to_copy;
 
                 if (write(out, indirect_block, size_to_write) < size_to_write) {
+                    free(direct_block);
+                    free(indirect_block);
                     return -errno;
                 } else {
                     left_to_copy -= size_to_write;
@@ -83,6 +90,8 @@ int dump_file(int img, int inode_nr, int out)
 
         if(i < EXT2_TIND_BLOCK){
             if (pread(img, direct_block, block_size, block_size * inode.i_block[i]) < block_size) {
+                free(direct_block);
+                free(indirect_block);
                 return -errno;
             }
             if(!indirect_block){
@@ -92,6 +101,9 @@ int dump_file(int img, int inode_nr, int out)
             int k = 0;
             while (k < (block_size / (int)sizeof(int)) && left_to_copy > 0 && direct_block[k] != 0){
                 if (pread(img, indirect_block, block_size, block_size * direct_block[k]) < block_size) {
+                    free(direct_block);
+                    free(indirect_block);
+                    free(double_indirect_block);
                     return -errno;
                 }
 
@@ -102,12 +114,18 @@ int dump_file(int img, int inode_nr, int out)
                 int n = 0;
                 while (n < (block_size / (int)sizeof(int)) && left_to_copy > 0 && indirect_block[n] != 0){
                     if (pread(img, double_indirect_block, block_size, block_size * indirect_block[n]) < block_size) {
+                        free(direct_block);
+                        free(indirect_block);
+                        free(double_indirect_block);
                         return -errno;
                     }
 
                     int size_to_write = (block_size < left_to_copy) ? block_size : left_to_copy;
 
                     if (write(out, double_indirect_block, size_to_write) < size_to_write) {
+                        free(direct_block);
+                        free(indirect_block);
+                        free(double_indirect_block);
                         return -errno;
                     } else {
                         left_to_copy -= size_to_write;
