@@ -25,10 +25,11 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
     struct ext2_dir_entry_2* entry = (struct ext2_dir_entry_2*) (buffer);
     char name[EXT2_NAME_LEN];
     int shift = 0;
+    int flag = 1;
 
-    while (entry && entry->inode != 0 && size_to_write > 0) {
+    while (flag == 1 && entry->inode != 0 && size_to_write > 0) {
 
-        memcpy(name, entry->name, entry->name_len);
+        strncpy(name, entry->name, EXT2_NAME_LEN);
         name[entry->name_len] = '\0';
 
         if (entry->file_type == EXT2_FT_DIR) {
@@ -42,7 +43,7 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
         size_to_write -= entry->rec_len;
 
         if (block_size <= shift) {
-            entry = 0;
+            flag = 0;
         } else {
             entry = (struct ext2_dir_entry_2*) (buffer + shift);
         }
