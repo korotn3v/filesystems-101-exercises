@@ -59,6 +59,10 @@ int dump_file(int img, int inode_nr, int out)
 
         if(i < EXT2_NDIR_BLOCKS){
             read_block_result = read_block(img, direct_block, &left_to_copy, block_size, inode.i_block[i], out);
+            if(read_block_result < 0){
+                free(direct_block);
+                return read_block_result;
+            }
         }
 
         if(i < EXT2_DIND_BLOCK){
@@ -74,7 +78,9 @@ int dump_file(int img, int inode_nr, int out)
             while (k < (block_size / (int)sizeof(int)) && left_to_copy > 0 && direct_block[k] != 0){
                 read_block_result = read_block(img, indirect_block, &left_to_copy, block_size, direct_block[k], out);
                 if(read_block_result < 0){
-                    k = block_size;
+                    free(direct_block);
+                    free(indirect_block);
+                    return read_block_result;
                 }
                 k++;
             }
@@ -107,27 +113,16 @@ int dump_file(int img, int inode_nr, int out)
                 while (n < (block_size / (int)sizeof(int)) && left_to_copy > 0 && indirect_block[n] != 0){
                     read_block_result = read_block(img, double_indirect_block, &left_to_copy, block_size, indirect_block[n], out);
                     if(read_block_result < 0){
-                        n = block_size;
+                        free(direct_block);
+                        free(indirect_block);
+                        free(double_indirect_block);
+                        return read_block_result;
                     }
-
                     n++;
                 }
-
                 k++;
             }
         }
-
-        if(read_block_result < 0){
-            free(direct_block);
-            if(indirect_block){
-                free(indirect_block);
-            }
-            if(double_indirect_block){
-                free(double_indirect_block);
-            }
-            return read_block_result;
-        }
-
         i++;
     }
     free(direct_block);
