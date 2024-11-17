@@ -9,8 +9,13 @@
 #include <errno.h>
 #include <unistd.h>
 
-int read_block(int img, char* buffer, int* left_to_copy, int block_size, int block){
+//void report_file(int inode_nr, char type, const char *name){
+//    printf("Inode: %d, Type: %c, Name: %s\n", inode_nr, type, name);
+//}
+
+int read_block(int img, int* buffer, int* left_to_copy, int block_size, int block){
     if (pread(img, buffer, block_size, block_size * block) < block_size) {
+        fprintf(stderr, "cant read from img (block %d)\n", block);
         return -errno;
     }
 
@@ -73,9 +78,9 @@ int dump_dir(int img, int inode_nr)
     }
 
     int left_to_copy = inode.i_size;
-    char* direct_block = fs_xmalloc(block_size);
-    char* indirect_block = NULL;
-    char* double_indirect_block = NULL;
+    int* direct_block = fs_xmalloc(block_size);
+    int* indirect_block = NULL;
+    int* double_indirect_block = NULL;
     int i = 0;
     int read_block_result = 0;
 
@@ -104,7 +109,7 @@ int dump_dir(int img, int inode_nr)
                 if(read_block_result < 0){
                     free(direct_block);
                     free(indirect_block);
-                    return -errno;
+                    return read_block_result;
                 }
                 k++;
             }
