@@ -9,6 +9,21 @@
 #include <errno.h>
 #include <unistd.h>
 
+int read_block(int img, int* buffer, int* left_to_copy, int block_size, int block, int out){
+    if (pread(img, buffer, block_size, block_size * block) < block_size) {
+        return -errno;
+    }
+
+    int size_to_write = (block_size < *left_to_copy) ? block_size : *left_to_copy;
+
+    if (write(out, buffer, size_to_write) < size_to_write) {
+        return -errno;
+    } else {
+        *left_to_copy -= size_to_write;
+        return 1;
+    }
+}
+
 int dump_file(int img, int inode_nr, int out)
 {
 	struct ext2_super_block super_block;
@@ -38,23 +53,12 @@ int dump_file(int img, int inode_nr, int out)
     int* indirect_block = NULL;
     int* double_indirect_block = NULL;
     int i = 0;
+    int read_block_result = 0;
 
     while (i < EXT2_N_BLOCKS && left_to_copy > 0 && inode.i_block[i] != 0) {
 
         if(i < EXT2_NDIR_BLOCKS){
-            if (pread(img, direct_block, block_size, block_size * inode.i_block[i]) < block_size) {
-                free(direct_block);
-                return -errno;
-            }
-
-            int size_to_write = (block_size < left_to_copy) ? block_size : left_to_copy;
-
-            if (write(out, direct_block, size_to_write) < size_to_write) {
-                free(direct_block);
-                return -errno;
-            } else {
-                left_to_copy -= size_to_write;
-            }
+            read_block_result = read_block(img, direct_block, &left_to_copy, block_size, inode.i_block[i], out);
         }
 
         if(i < EXT2_DIND_BLOCK){
@@ -68,22 +72,10 @@ int dump_file(int img, int inode_nr, int out)
 
             int k = 0;
             while (k < (block_size / (int)sizeof(int)) && left_to_copy > 0 && direct_block[k] != 0){
-                if (pread(img, indirect_block, block_size, block_size * direct_block[k]) < block_size) {
-                    free(direct_block);
-                    free(indirect_block);
-                    return -errno;
+                read_block_result = read_block(img, indirect_block, &left_to_copy, block_size, direct_block[k], out);
+                if(read_block_result < 0){
+                    break;
                 }
-
-                int size_to_write = (block_size < left_to_copy) ? block_size : left_to_copy;
-
-                if (write(out, indirect_block, size_to_write) < size_to_write) {
-                    free(direct_block);
-                    free(indirect_block);
-                    return -errno;
-                } else {
-                    left_to_copy -= size_to_write;
-                }
-
                 k++;
             }
         }
@@ -113,22 +105,9 @@ int dump_file(int img, int inode_nr, int out)
 
                 int n = 0;
                 while (n < (block_size / (int)sizeof(int)) && left_to_copy > 0 && indirect_block[n] != 0){
-                    if (pread(img, double_indirect_block, block_size, block_size * indirect_block[n]) < block_size) {
-                        free(direct_block);
-                        free(indirect_block);
-                        free(double_indirect_block);
-                        return -errno;
-                    }
-
-                    int size_to_write = (block_size < left_to_copy) ? block_size : left_to_copy;
-
-                    if (write(out, double_indirect_block, size_to_write) < size_to_write) {
-                        free(direct_block);
-                        free(indirect_block);
-                        free(double_indirect_block);
-                        return -errno;
-                    } else {
-                        left_to_copy -= size_to_write;
+                    read_block_result = read_block(img, double_indirect_block, &left_to_copy, block_size, indirect_block[n], out);
+                    if(read_block_result < 0){
+                        break;
                     }
 
                     n++;
@@ -136,6 +115,17 @@ int dump_file(int img, int inode_nr, int out)
 
                 k++;
             }
+        }
+
+        if(read_block_result < 0){
+            free(direct_block);
+            if(indirect_block){
+                free(indirect_block);
+            }
+            if(double_indirect_block){
+                free(double_indirect_block);
+            }
+            return read_block_result;
         }
 
         i++;
