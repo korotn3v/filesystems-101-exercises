@@ -25,9 +25,8 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
     struct ext2_dir_entry_2* entry = (struct ext2_dir_entry_2*) (buffer);
     char name[EXT2_NAME_LEN];
     int shift = 0;
-    int flag = 1;
 
-    while (flag == 1 && entry->inode != 0 && size_to_write > 0) {
+    while (entry->inode != 0 && size_to_write > 0) {
 
         memcpy(name, entry->name, EXT2_NAME_LEN);
         name[entry->name_len] = '\0';
@@ -39,13 +38,16 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
             report_file(entry->inode, 'f', name);
         }
 
+        if (shift + entry->rec_len > block_size) {
+            break;
+        }
         shift += entry->rec_len;
         size_to_write -= entry->rec_len;
 
         if (block_size <= shift) {
-            flag = 0;
+            break;
         } else {
-            entry = (struct ext2_dir_entry_2*) (buffer + shift);
+            entry = (struct ext2_dir_entry_2*)((char*)buffer + shift);
         }
     }
     return 1;
