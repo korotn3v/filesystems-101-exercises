@@ -27,7 +27,7 @@ int read_block(int img, int* buffer, int* left_to_copy, int block_size, int bloc
 
     while (size_to_process > 0 && shift < block_size && entry->inode != 0) {
         if (entry->rec_len < sizeof(struct ext2_dir_entry_2) || entry->rec_len + shift > block_size) {
-            fprintf(stderr, "bad catalog\n");
+            fprintf(stderr, "bad catalog: invalid rec_len in entry (inode: %d, rec_len: %d)\n", entry->inode, entry->rec_len);
             return -EINVAL;
         }
 
