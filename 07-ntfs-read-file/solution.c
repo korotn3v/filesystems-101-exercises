@@ -1,9 +1,13 @@
 #include <solution.h>
-#include <ntfs-3g/ntfs-3g.h>
 #include <errno.h>
 #include <unistd.h>
 #include "fs_malloc.h"
 #include "fs_string.h"
+#include <ntfs-3g/device.h> 
+#include <ntfs-3g/inode.h>
+#include <ntfs-3g/volume.h>
+#include <ntfs-3g/attrib.h>
+#include <ntfs-3g/runlist.h>
 
 
 int dump_file(int img, const char *path, int out) {
