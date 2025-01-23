@@ -114,7 +114,8 @@ void ps(void){
         }
 
         ssize_t bytes_read_envp = fread(read_envp, 1, BUFFER_SIZE - 1, file_env);
-        fclose(file_env);
+        
+	fclose(file_env);
 
         if (bytes_read_envp == -1)
         {
