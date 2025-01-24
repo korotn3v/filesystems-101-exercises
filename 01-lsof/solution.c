@@ -15,7 +15,6 @@ static const char* FD_PATH = "/fd/";
 
 void lsof(void) {
     DIR* proc_directory = opendir(PROC_PATH); // open proc_directory
-
     if (proc_directory == NULL) {
         report_error(PROC_PATH, errno);
         return;
@@ -29,7 +28,7 @@ void lsof(void) {
     while ((proc_dirent = readdir(proc_directory)) != NULL) {
 
         char* p_end;
-        strtol(proc_dirent->d_name, &p_end, 10); // Преобразуем имя директории в число pid = PID
+        pid_t pid = (pid_t) strtol(proc_dirent->d_name, &p_end, 10); // Преобразуем имя директории в число pid = PID
 
         if (*p_end) {
             continue;
@@ -37,7 +36,7 @@ void lsof(void) {
 
         snprintf(file_path, MAX_FILEPATH_LENGTH, "%s%s%s", PROC_PATH, proc_dirent->d_name, FD_PATH); // file_path = /proc/PID/fd/
 
-        DIR* files_directory = opendir(file_path);
+        DIR* files_directory = opendir(file_path); // open /proc/pid/fd/ directory
         if (files_directory == NULL) {
             report_error(file_path, errno);
             continue;
@@ -47,7 +46,7 @@ void lsof(void) {
         char* ptr_on_end_file_path = file_path + (strlen(PROC_PATH) + strlen(proc_dirent->d_name) + strlen(FD_PATH)) * sizeof(char);
         struct dirent* files_dirent;
 
-        while ((files_dirent = readdir(proc_directory)) != NULL) {
+        while ((files_dirent = readdir(files_directory)) != NULL) {
 
             if (strcmp(files_dirent->d_name, ".") == 0 || strcmp(files_dirent->d_name, "..") == 0) // check that name is digit
             {
