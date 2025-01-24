@@ -52,14 +52,14 @@ void ps(void) {
             continue;
         }
 
-        sprintf(current_path, "%s%s%s", PROC_PATH, proc_dirent->d_name, EXE_PATH); //current_path = /proc/PID/exe
+        snprintf(current_path, MAX_FILEPATH_LENGTH, "%s%s%s", PROC_PATH, proc_dirent->d_name, EXE_PATH); //current_path = /proc/PID/exe
         if (readlink(current_path, exe, EXE_MAX_LENGTH) == -1) //читаем в exe ссылку по пути current_path
         {
             report_error(current_path, errno);
             continue;
         }
 
-        sprintf(current_path, "%s%s%s", PROC_PATH, proc_dirent->d_name, CMDLINE_PATH); //current_path = /proc/PID/cmdline
+        snprintf(current_path, MAX_FILEPATH_LENGTH, "%s%s%s", PROC_PATH, proc_dirent->d_name, CMDLINE_PATH); //current_path = /proc/PID/cmdline
         FILE* ptr_file1; //файл по пути current_path
         if ((ptr_file1 = fopen(current_path, "r")) == NULL)
         {
@@ -81,7 +81,7 @@ void ps(void) {
         }
         fclose(ptr_file1);
 
-        sprintf(current_path, "%s%s%s", PROC_PATH, proc_dirent->d_name, ENVIRON_PATH); //current_path = /proc/pid/environ
+        snprintf(current_path, MAX_FILEPATH_LENGTH, "%s%s%s", PROC_PATH, proc_dirent->d_name, ENVIRON_PATH); //current_path = /proc/pid/environ
         FILE* ptr_file2; //файл по пути current_path
         if ((ptr_file2 = fopen(current_path, "r")) == NULL)
         {
