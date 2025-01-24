@@ -28,7 +28,7 @@ void lsof(void) {
     while ((proc_dirent = readdir(proc_directory)) != NULL) {
 
         char* p_end;
-        pid_t pid = (pid_t) strtol(proc_dirent->d_name, &p_end, 10); // Преобразуем имя директории в число pid = PID
+        strtol(proc_dirent->d_name, &p_end, 10); // Преобразуем имя директории в число pid = PID
 
         if (*p_end) {
             continue;
