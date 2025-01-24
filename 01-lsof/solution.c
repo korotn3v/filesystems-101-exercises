@@ -28,7 +28,7 @@ void lsof(void) {
     while ((proc_dirent = readdir(proc_directory)) != NULL) {
 
         char* p_end;
-        strtol(proc_dirent->d_name, &p_end, 10); // Преобразуем имя директории в число pid = PID
+        strtol(proc_dirent->d_name, &p_end, 10); // p_end это первый символ который не число
 
         if (*p_end) {
             continue;
@@ -55,7 +55,6 @@ void lsof(void) {
 
             // на место куда указывает ptr_on_end_file_path копируем имя files_dirent (то есть к file_path добавим имя files_dirent)
             snprintf(ptr_on_end_file_path, MAX_FILEPATH_LENGTH - (strlen(PROC_PATH) + strlen(proc_dirent->d_name) + strlen(FD_PATH)), "%s", files_dirent->d_name);
-//          strncpy(ptr_on_end_file_path, files_dirent->d_name, MAX_FILEPATH_LENGTH - (strlen(PROC_PATH) + strlen(proc_dirent->d_name) + strlen(FD_PATH)));
             int len_lsof;
 
             if ((len_lsof = readlink(file_path, lsof_path, MAX_FILEPATH_LENGTH)) == -1) // читаем ссылку по пути file_path в lsof_path
