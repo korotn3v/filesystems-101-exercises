@@ -1,164 +1,126 @@
-#include <solution.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <dirent.h>
-#include <string.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <ctype.h>
-#include <string.h>
+#include "solution.h"
+#include <dirent.h>    // (DIR, struct dirent)
+#include <errno.h>     // codes of errno
+#include <stdio.h>     // (fopen, fclose, sprintf)
+#include <stdlib.h>    // (malloc, calloc, free)
+#include <string.h>    // (strtol, strlen)
+#include <unistd.h>    // (readlink, close)
+#include <fcntl.h>     // (open, O_RDONLY)
+#include <sys/types.h> // pid_t
 
-#define BUFFER_SIZE 1024 * 1024
+// Константы для предельных значений аргументов и длины строк
+#define MAX_ARG 4096             // max number of elements in argv and envp
+#define MAX_ARG_LENGTH 4096      // max length of elements in argv and envp
+#define MAX_FILEPATH_LENGTH 4096 // max length of path to file in Linux
+#define EXE_MAX_LENGTH 4096      // max length of path to exe(after readlink)
 
-void ps(void){
+// Пути к системным файлам в каталоге /proc
+static const char* PROC_PATH = "/proc/";       //path for proc
+static const char* EXE_PATH = "/exe";          //path for exe
+static const char* CMDLINE_PATH = "/cmdline";  //path for argv
+static const char* ENVIRON_PATH = "/environ";  //path for envp
 
-	DIR *proc_dir = opendir("/proc");
-	if (!proc_dir){
-		report_error("/proc", ENOENT);
-		return;
-	}
+void ps(void) {
+    DIR* proc_directory = opendir(PROC_PATH); // Открываем каталог /proc
+    if (proc_directory == NULL)
+    {
+        report_error(PROC_PATH, errno);
+        return;
+    }
 
-	struct dirent *cur_dir;
-	while ((cur_dir = readdir(proc_dir))){
+    // Выделяем память для хранения пути к исполняемому файлу(exe) и массивов аргументов(argv) и переменных окружения(envp)
+    char* exe = (char*) calloc(EXE_MAX_LENGTH, sizeof(char)); // absolute path to the executable file of the process
+    char** argv = (char**) malloc(MAX_ARG * sizeof(char*)); // array of command line arguments to the process
+    char** envp = (char**) malloc(MAX_ARG * sizeof(char*)); // array of environment variables of the process
 
-        if (!isdigit(cur_dir->d_name[0])){
-            continue;
-        }
+    // Инициализируем память для каждого элемента argv и envp
+    for (int i = 0; i < MAX_ARG; ++i)
+    {
+        argv[i] = (char*) malloc(MAX_ARG_LENGTH);
+        envp[i] = (char*) malloc(MAX_ARG_LENGTH);
+    }
 
-        char buf_exe[PATH_MAX];
-        char cur_path[128];
-        char *read_argv = malloc(BUFFER_SIZE + 1);
-        char *read_envp = malloc(BUFFER_SIZE + 1);
-        char **buf_argv = NULL;
-        char **buf_envp = NULL;
+    struct dirent* proc_dirent; // Структура файла/директории
+    char* current_path = (char*) malloc(MAX_FILEPATH_LENGTH); // Буфер для хранения пути к файлам в /proc
 
-        if (!read_argv || !read_envp){
-            report_error("/proc", ENOMEM);
-            exit(EXIT_FAILURE);
-        }
-
-        //read into buf_exe
-        pid_t pid = atoi(cur_dir->d_name);
-        snprintf(cur_path, sizeof(cur_path), "/proc/%d/exe", pid);
-        ssize_t exe_len = readlink(cur_path, buf_exe, PATH_MAX);
-
-        if (exe_len == -1){
-            report_error(cur_path, errno);
-            free(read_argv);
-            free(read_envp);
-            continue;
-        }
-        buf_exe[exe_len] = '\0';
-
-        //read into arg_read
-        snprintf(cur_path, sizeof(cur_path), "/proc/%d/cmdline", pid);
-        FILE *file_cmdline = fopen(cur_path, "r");
-
-        if (!file_cmdline){
-            if (errno != EACCES)
-                report_error(cur_path, errno);
-            free(read_argv);
-            free(read_envp);
-            continue;
-        }
-
-        ssize_t bytes_read_cmdline = fread(read_argv, 1, BUFFER_SIZE - 1, file_cmdline);
-        fclose(file_cmdline);
-
-        if (bytes_read_cmdline == -1)
+    // Перебираем все записи в каталоге /proc
+    while ((proc_dirent = readdir(proc_directory)) != NULL) {
+        char* p_end;
+        pid_t pid = (pid_t) strtol(proc_dirent->d_name, &p_end, 10); // Преобразуем имя директории в число pid = PID
+        if (*p_end)
         {
-            report_error(cur_path, errno);
-            free(read_argv);
-            free(read_envp);
-            continue;
-        }
-        read_argv[bytes_read_cmdline] = '\0';
-
-        //count nuber of strings
-        size_t number_strings_argv = 0;
-        for (size_t i = 0; i < (size_t)bytes_read_cmdline; i++){
-            if (read_argv[i] == '\0')
-                number_strings_argv++;
-        }
-
-        buf_argv = malloc((number_strings_argv + 1) * sizeof(char *));
-        if(!buf_argv){
-            report_error(cur_path, ENOMEM);
-            free(read_argv);
-            free(read_envp);
-            exit(EXIT_FAILURE);
-        }
-
-        //parse arv_read into arv_buf
-        size_t count_argv = 0;
-        char *ptr_argv = read_argv;
-        while (*ptr_argv && count_argv < (number_strings_argv + 1)){
-            buf_argv[count_argv] = ptr_argv;
-            count_argv++;
-            ptr_argv += strlen(ptr_argv) + 1;
-        }
-        buf_argv[count_argv] = NULL;
-
-        //read into env_read
-        snprintf(cur_path, sizeof(cur_path), "/proc/%d/environ", pid);
-        FILE *file_env = fopen(cur_path, "r");
-
-        if (!file_env){
-            if (errno != EACCES)
-                report_error(cur_path, errno);
-            free(read_argv);
-            free(read_envp);
-            free(buf_argv);
             continue;
         }
 
-        ssize_t bytes_read_envp = fread(read_envp, 1, BUFFER_SIZE - 1, file_env);
-        
-	fclose(file_env);
-
-        if (bytes_read_envp == -1)
+        sprintf(current_path, "%s%s%s", PROC_PATH, proc_dirent->d_name, EXE_PATH); //current_path = /proc/PID/exe
+        if (readlink(current_path, exe, EXE_MAX_LENGTH) == -1) //читаем в exe ссылку по пути current_path
         {
-            report_error(cur_path, errno);
-            free(read_argv);
-            free(read_envp);
-            free(buf_argv);
+            report_error(current_path, errno);
             continue;
         }
-        read_argv[bytes_read_envp] = '\0';
 
-        //count nuber of strings
-        size_t number_strings_envp = 0;
-        for (size_t i = 0; i < (size_t)(bytes_read_envp); i++){
-            if (read_envp[i] == '\0')
-                number_strings_envp++;
+        sprintf(current_path, "%s%s%s", PROC_PATH, proc_dirent->d_name, CMDLINE_PATH); //current_path = /proc/PID/cmdline
+        FILE* ptr_file1; //файл по пути current_path
+        if ((ptr_file1 = fopen(current_path, "r")) == NULL)
+        {
+            report_error(current_path, errno);
+            continue;
         }
 
-        buf_envp = malloc((number_strings_envp + 1) * sizeof(char *));
-        if(!buf_envp){
-            report_error(cur_path, ENOMEM);
-            free(read_argv);
-            free(read_envp);
-            free(buf_argv);
-            exit(EXIT_FAILURE);
+        // Читаем аргументы из файла и сохраняем их в argv_report_process
+        char** argv_report_process = (char**) malloc(MAX_ARG * sizeof(char*));
+        for (int i = 0; i < MAX_ARG; i++)
+        {
+            size_t max_arg_length = MAX_ARG_LENGTH;
+            if (getdelim(&argv[i], &max_arg_length, '\0', ptr_file1) != -1 && argv[i][0] != '\0') { //читаем в argv[i] элемент из ptr_file1 разделенный '\0'
+                argv_report_process[i] = argv[i];
+            } else {
+                argv_report_process[i] = NULL;
+                break;
+            }
+        }
+        fclose(ptr_file1);
+
+        sprintf(current_path, "%s%s%s", PROC_PATH, proc_dirent->d_name, ENVIRON_PATH); //current_path = /proc/pid/environ
+        FILE* ptr_file2; //файл по пути current_path
+        if ((ptr_file2 = fopen(current_path, "r")) == NULL)
+        {
+            free(argv_report_process);
+            report_error(current_path, errno);
+            continue;
         }
 
-        //parse read_envp into buf_envp
-        size_t count_envp = 0;
-        char *ptr_envp = read_envp;
-        while (*ptr_envp && count_envp < (number_strings_envp + 1)){
-            buf_envp[count_envp] = ptr_envp;
-            count_envp++;
-            ptr_envp += strlen(ptr_envp) + 1;
+        // Читаем переменные окружения из файла и сохраняем их в envp_report_process
+        char** envp_report_process = (char**) malloc(MAX_ARG * sizeof(char*));
+        for (int i = 0; i < MAX_ARG; i++)
+        {
+            size_t max_arg_length = MAX_ARG_LENGTH;
+            if (getdelim(&envp[i], &max_arg_length, '\0', ptr_file2) != -1 && envp[i][0] != '\0') //читаем в argv[i] элемент из ptr_file2 разделенный '\0'
+            {
+                envp_report_process[i] = envp[i];
+            } else {
+                envp_report_process[i] = NULL;
+                break;
+            }
         }
-        buf_envp[count_envp] = NULL;
+        fclose(ptr_file2);
 
-        //report process
-        report_process(pid, buf_exe, buf_argv, buf_envp);
-        free(buf_argv);
-        free(buf_envp);
-        free(read_argv);
-        free(read_envp);
-	}
-	closedir(proc_dir);
+        report_process(pid, exe, argv_report_process, envp_report_process);
+
+        //освобождаем память и закрываем файлы
+        free(argv_report_process);
+        free(envp_report_process);
+    }
+
+    free(current_path);
+    closedir(proc_directory);
+
+    for (int i = 0; i < MAX_ARG; i++)
+    {
+        free(argv[i]);
+        free(envp[i]);
+    }
+    free(exe);
+    free(argv);
+    free(envp);
 }
