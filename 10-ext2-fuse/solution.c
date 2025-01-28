@@ -1,303 +1,275 @@
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION 31
+#endif
+
 #include "solution.h"
-#include <sys/stat.h>
-#include <unistd.h>
-#include <stdbool.h>
-#include <ext2fs/ext2fs.h>
+
+#include <err.h>
 #include <fuse.h>
+#include <errno.h>
+#include <fs_malloc.h>
+#include <string.h>
+#include <stdlib.h>
 
-#define EXT2_SB_OFFSET 1024
+#include "fs_dir_entry.h"
+#include "fs_ext2.h"
 
-int inode_Directory(int img, struct ext2_super_block* SB, size_t blk, const char* path);
-int block_Size(struct ext2_super_block* SB) {
-    return 1024 << SB->s_log_block_size;
-}
-ssize_t SB_Read(int img, struct ext2_super_block* SB) {
-    size_t size = sizeof(struct ext2_super_block);
-	int status = pread(img, SB, size, EXT2_SB_OFFSET);
-    if (status < 0) {
-        return -errno;
-    };
-    return 0;
-}
-int inode_Read(int img, struct ext2_inode* inode, int inode_number, struct ext2_super_block* SB) {
-
-    size_t inode_index = (inode_number - 1) % SB->s_inodes_per_group;
-    size_t desc_index = (inode_number - 1) / SB->s_inodes_per_group;
-
-    struct ext2_group_desc group_desc;
-
-    int blk_size = EXT2_BLOCK_SIZE(SB);
-
-    size_t offset = (SB->s_first_data_block + 1) * blk_size + sizeof(struct ext2_group_desc) * desc_index;
-
-	int status = pread(img, &group_desc, sizeof(struct ext2_group_desc), offset);
-
-	if (status < 0) {
-        return -errno;
-    }
-
-    int pos = group_desc.bg_inode_table * blk_size + inode_index * SB->s_inode_size;
-
-    int inode_size = sizeof(struct ext2_inode);
-    status = pread(img, inode, inode_size, pos);
-
-    if (status) {
-        return -errno;
-    }
-    return 0;
-}
-int ind_get(int img, struct ext2_super_block* SB, size_t blk, const char* path) {
-
-    int blk_size = EXT2_BLOCK_SIZE(SB);
-    int status;
-    uint32_t* buffer = malloc(blk_size);
-
-    if (blk == 0) {
-        free(buffer);
-        return -ENOENT;
-    }
-    else
-	{
-		status = pread(img, buffer, blk_size, blk_size * blk);
-		if (status < 0) {
-        free(buffer);
-        return -errno;
-    }
-	}
-    for (uint i = 0; i < blk_size / sizeof(int); ++i) {
-        status = inode_Directory(img, SB, buffer[i], path);
-        if (status) {
-            free(buffer);
-            return status;
-        }
-    }
-
-    free(buffer);
-    return 0;
-}
-int dind_get(int img, struct ext2_super_block* SB, size_t blk, const char* path) {
-
-	int status;
-    int blk_size = EXT2_BLOCK_SIZE(SB);
-    unsigned int* doubled_ind = malloc(blk_size);
-
-    if (blk == 0) {
-        free(doubled_ind);
-        return -ENOENT;
-    }
-	status = pread(img, doubled_ind, blk_size, blk_size * blk);
-    if ( status< 0) {
-        free(doubled_ind);
-        return -errno;
-    }
-
-    for (size_t i = 0; i < blk_size / sizeof(int); ++i) {
-        status = ind_get(img, SB, doubled_ind[i], path);
-        if (status != 0) {
-            free(doubled_ind);
-            return status;
-        }
-    }
-
-    free(doubled_ind);
-    return 0;
-}
-int inode_Get(int img, struct ext2_super_block* SB, int inode_number, const char* path) {
-
-    struct ext2_inode inode;
-    int status;
-    if (inode_number == 0) {
-        return -ENOENT;
-    }
-    if (path[0] != '/') {
-        return inode_number;
-    }
-
-    ++path;
-    status = inode_Read(img, &inode, inode_number, SB);
-
-    if (status < 0) {
-        return -errno;
-    }
-
-
-
-    for (size_t i = 0; i < EXT2_NDIR_BLOCKS; ++i) {
-		status = inode_Directory(img, SB, inode.i_block[i], path);
-
-        if (status)
-            return status;
-
-    }
-    status = ind_get(img, SB, inode.i_block[EXT2_IND_BLOCK], path);
-    if (status)
-        return status;
-
-    status = dind_get(img, SB, inode.i_block[EXT2_DIND_BLOCK], path);
-
-    if (status)
-        return status;
-
-
-    return -ENOENT;
-}
-int inode_Directory(int img, struct ext2_super_block* SB, size_t blk, const char* path) {
-
-    if (blk == 0) {
-        return -ENOENT;
-    }
-    int status;
-    int blk_size = EXT2_BLOCK_SIZE(SB);
-
-    char* buffer = malloc(blk_size);
-    status = pread(img, buffer, blk_size, blk * blk_size);
-    if (status < 0) {
-        free(buffer);
-        return -errno;
-    }
-
-    char* pc = buffer;
-
-    while (pc - buffer < blk_size) {
-
-        struct ext2_dir_entry_2* dir_entry = (struct ext2_dir_entry_2*) pc;
-
-        int inode = dir_entry->inode;
-
-        if (inode == 0) {
-            free(buffer);
-            return -ENOENT;
-        }
-        const char* next_c = path;
-
-        while (*next_c && *next_c != '/') {
-            ++next_c;
-        }
-        int equivavlent = strncmp(path, dir_entry->name, dir_entry->name_len);
-
-        if (next_c - path == dir_entry->name_len && equivavlent == 0) {
-
-            int inode_number = dir_entry->inode;
-
-            if (next_c[0] != '/') {
-                free(buffer);
-                return inode_number;
-            }
-            if (dir_entry->file_type == EXT2_FT_DIR) {
-                free(buffer);
-                return inode_Get(img, SB, inode_number, next_c);
-            }
-            free(buffer);
-            return -ENOTDIR;
-        }
-        pc += dir_entry->rec_len;
-    }
-    free(buffer);
-    return 0;
-}
-
-//new functions
-
-int Read;
-int ext2_Img;
-struct ext2_super_block ext2_SB;
-
-void *init_(struct fuse_conn_info *conn_info, struct fuse_config *config) {
-    (void)conn_info;
-	(void)config;
-    return NULL;
-}
-static int _create(const char *path, mode_t mode, struct fuse_file_info *info) {
-    (void)path;
-    (void)mode;
-    (void)info;
-    return -EROFS;
-}
-static int _open(const char *path, struct fuse_file_info *info) {
-    int status;
-
-    if ((info->flags & O_ACCMODE) != O_RDONLY) {
-        return -EROFS;
-    }
-    status = inode_Get(ext2_Img, &ext2_SB, EXT2_ROOT_INO, path);
-    if (status < 0) {
-        return -ENOENT;
-    }
-    return 0;
-}
-static int _write(const char *req, const char *buffer, size_t size, off_t offset, struct fuse_file_info *info) {
-    (void)req;
-    (void)buffer;
-    (void)size;
-    (void)offset;
-    (void)info;
-    return -EROFS;
-}
-static int _write_buf(const char *path, struct fuse_bufvec *buffer, off_t offset, struct fuse_file_info *info) {
-    (void)path;
-    (void)buffer;
-    (void)offset;
-    (void)info;
-    return -EROFS;
-}
-static int _mkdir(const char *path, mode_t mode) {
-    (void)path;
-    (void)mode;
-    return -EROFS;
-}
-static int _mknod(const char *path, mode_t mode, dev_t dev) {
-    (void)path;
-    (void)mode;
-    (void)dev;
-    return -EROFS;
-}
-static int _getattr(const char *path, struct stat *stat, struct fuse_file_info *info) {
-	(void)info;
-	int status;
-    size_t stat_size = sizeof(struct stat);
-    memset(stat, 0, stat_size);
-
-    int inode_number;
-
-    if ((inode_number = inode_Get(ext2_Img, &ext2_SB, EXT2_ROOT_INO, path)) < 0) {
-        return -ENOENT;
-    }
-
-    struct ext2_inode inode;
-    status = inode_Read(ext2_Img, &inode, inode_number, &ext2_SB);
-    if (status < 0) {
-        return -errno;
-    }
-
-    stat->st_blksize = block_Size(&ext2_SB);
-    stat->st_ino = inode_number;
-    stat->st_mode = inode.i_mode;
-    stat->st_nlink = inode.i_links_count;
-    stat->st_uid = inode.i_uid;
-    stat->st_gid = inode.i_gid;
-    stat->st_size = inode.i_size;
-    stat->st_blocks = inode.i_blocks;
-    stat->st_atime = inode.i_atime;
-    stat->st_mtime = inode.i_mtime;
-    stat->st_ctime = inode.i_ctime;
-
-    return 0;
-}
-static const struct fuse_operations ext2_ops = {
-	.init = init_,
-	.create = _create,
-    .write = _write,
-    .write_buf = _write_buf,
-	.open = _open,
-    .mkdir = _mkdir,
-    .mknod = _mknod,
-    .getattr = _getattr,
+struct ext2_context {
+    struct ext2_fs *fs;
 };
 
-int ext2fuse(int img, const char *mntp)
-{
-	(void) img;
+static struct ext2_context ctx;
 
-	char *argv[] = {"exercise", "-f", (char *)mntp, NULL};
-	return fuse_main(3, argv, &ext2_ops, NULL);
+static int ext2_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi) {
+
+    (void) fi;
+    int ret = 0;
+    struct ext2_entity *entity = NULL;
+    fs_inode *inode = NULL;
+
+    memset(stbuf, 0, sizeof(struct stat));
+
+    ret = ext2_entity_init(ctx.fs->fd, path, &entity);
+    if (ret != 0) {
+        ret = -ENOENT;
+        goto only_entry_cleanup;
+    }
+
+    fs_blockgroup_descriptor *blockgroup_descriptor = fs_xmalloc(sizeof(fs_blockgroup_descriptor));
+
+    uint32_t block_group = (entity->inode - 1) / ctx.fs->superblock->s_inodes_per_group;
+    ret = init_blockgroup_descriptor(ctx.fs->fd, ctx.fs->superblock, blockgroup_descriptor, block_group);
+    if (ret != 0) goto cleanup;
+
+    ret = init_inode(ctx.fs->fd, ctx.fs->superblock, blockgroup_descriptor, (int) entity->inode, &inode);
+    if (ret != 0) { goto cleanup; }
+
+    stbuf->st_mode = inode->type_and_permissions; // File mode
+    stbuf->st_nlink = inode->hard_link_count; // Number of hard links
+    stbuf->st_uid = inode->user_id; // User ID
+    stbuf->st_gid = inode->group_id; // Group ID
+    stbuf->st_size = inode->size_lower; // File size (lower 32 bits)
+    stbuf->st_blocks = inode->disk_sector_count; // Number of 512-byte blocks
+    stbuf->st_atime = inode->last_access_time; // Last access time
+    stbuf->st_mtime = inode->last_modification_time; // Last modification time
+    stbuf->st_ctime = inode->creation_time; // Creation time
+
+    if (S_ISDIR(inode->type_and_permissions)) {
+        stbuf->st_mode |= S_IFDIR;
+    } else {
+        stbuf->st_mode |= S_IFREG;
+    }
+
+
+cleanup:
+    free(blockgroup_descriptor);
+    free(inode);
+only_entry_cleanup:
+    ext2_entity_free(entity);
+    return ret;
+}
+
+static int ext2_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
+                        struct fuse_file_info *fi, enum fuse_readdir_flags flags) {
+    if (offset != 0) errx(3, "offset not supported");
+    (void) fi; // File info is not used
+    (void) flags; // Flags are not used
+
+    int ret = 0;
+    struct ext2_entity *entity = NULL;
+    struct ext2_blkiter *blkiter = NULL;
+
+    ret = ext2_entity_init(ctx.fs->fd, path, &entity);
+    if (ret != 0) {
+        ret = -ENOENT;
+        goto only_entry_cleanup;
+    }
+
+    if ((ret = ext2_blkiter_init(&blkiter, entity->file_system, entity->inode))) {
+        ret = -ENOENT;
+        goto cleanup;
+    }
+
+    fs_vector dir_entries;
+    dump_directory(entity->file_system, blkiter, &dir_entries);
+
+    VectorIterator dir_iterator;
+    vector_iterator_init(&dir_iterator, &dir_entries);
+
+
+    while (vector_iterator_has_next(&dir_iterator)) {
+        dir_entry *entry = (dir_entry *) vector_iterator_next(&dir_iterator);
+
+        char *entry_name = strndup(entry->name, entry->name_length);
+        if (!entry_name) {
+            ret = -ENOMEM;
+            break;
+        }
+        struct stat st;
+        memset(&st, 0, sizeof(st));
+        if (entry->type_indicator == 2) {
+            st.st_mode = S_IFDIR | 0755;
+        } else if (entry->type_indicator == 1) {
+            st.st_mode = S_IFREG | 0644;
+        } else {
+            st.st_mode = 0; // Unknown
+        }
+        filler(buf, entry_name, &st, 0, 0);
+
+        free(entry_name);
+    }
+
+    vector_free_all_elements(&dir_entries, (void (*)(void *)) free_entry);
+    vector_free(&dir_entries);
+
+cleanup:
+    ext2_blkiter_free(blkiter);
+only_entry_cleanup:
+    ext2_entity_free(entity);
+    return ret;
+}
+
+static int ext2_open(const char *path, struct fuse_file_info *fi) {
+    int ret;
+    struct ext2_entity *entity = NULL;
+    static fs_inode *inode_ptr = NULL;
+    fs_blockgroup_descriptor *blockgroup_descriptor = NULL;
+    ret = ext2_entity_init(ctx.fs->fd, path, &entity);
+    if (ret != 0) { goto cleanup; }
+
+    blockgroup_descriptor = fs_xmalloc(sizeof(fs_blockgroup_descriptor));
+    uint32_t block_group = (entity->inode - 1) / ctx.fs->superblock->s_inodes_per_group;
+
+    ret = init_blockgroup_descriptor(ctx.fs->fd, ctx.fs->superblock, blockgroup_descriptor, block_group);
+    if (ret != 0) goto cleanup;
+
+    ret = init_inode(ctx.fs->fd, ctx.fs->superblock, blockgroup_descriptor, (int) entity->inode, &inode_ptr);
+    if (ret != 0) goto cleanup;
+
+    if ((fi->flags & O_ACCMODE) != O_RDONLY) { return -EROFS; }
+
+cleanup:
+    ext2_entity_free(entity);
+    free(inode_ptr);
+    free(blockgroup_descriptor);
+    return ret;
+}
+
+struct read_context {
+    char *buf; // Buffer to write data to
+    size_t size; // Number of bytes requested by FUSE
+    off_t offset; // Offset from where to start reading
+    size_t written; // Number of bytes written to buffer
+};
+
+static size_t read_file_callback(const void *buffer, size_t bytes_to_write, const off_t offset, void *context) {
+    struct read_context *my_context = (struct read_context *) context;
+    (void) offset;
+
+    memcpy(my_context->buf + my_context->written, buffer, bytes_to_write);
+
+    my_context->written += bytes_to_write;
+
+    return bytes_to_write;
+}
+
+static size_t dump_file_part_callback(const int img, int inode, void *context) {
+    struct read_context *task_ctx = (struct read_context *) context;
+
+    uint32_t offset = task_ctx->offset + task_ctx->written;
+    uint32_t remaining = task_ctx->size - task_ctx->written;
+
+    int ret = dump_ext2_file_part(img, inode, context, read_file_callback, offset, remaining);
+    if (ret < 0) { return 0; }
+
+    return task_ctx->written;
+}
+
+static int ext2_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    if ((fi->flags & O_ACCMODE) != O_RDONLY) { return -EACCES; }
+
+    int ret = 0;
+    struct ext2_entity *entity = NULL;
+
+    ret = ext2_entity_init(ctx.fs->fd, path, &entity);
+    if (ret != 0) {
+        ret = -ENOENT;
+        goto only_entry_cleanup;
+    }
+
+    struct read_context task_ctx = {
+        .buf = buf,
+        .size = size,
+        .offset = offset,
+        .written = 0
+    };
+
+    dump_file_part_callback(entity->img, entity->inode, &task_ctx);
+
+    ext2_entity_free(entity);
+    return (int) task_ctx.written;
+
+only_entry_cleanup:
+    ext2_entity_free(entity);
+    return ret;
+}
+
+static int ext2_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    (void) path;
+    (void) buf;
+    (void) size;
+    (void) offset;
+    (void) fi;
+
+    return -EROFS;
+}
+
+static int ext2_truncate(const char *path, off_t size, struct fuse_file_info *fi) {
+    (void) path;
+    (void) size;
+    (void) fi;
+
+    return -EROFS;
+}
+
+static int ext2_chmod(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    (void) path;
+    (void) mode;
+    (void) fi;
+
+    return -EROFS;
+}
+
+static int ext2_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    (void) path;
+    (void) mode;
+    (void) fi;
+
+    return -EROFS;
+}
+
+
+static const struct fuse_operations ext2_ops = {
+    .getattr = ext2_getattr,
+    .readdir = ext2_readdir,
+    .open = ext2_open,
+    .read = ext2_read,
+    // And mock writes
+    .write = ext2_write,
+    .truncate = ext2_truncate,
+    .chmod = ext2_chmod,
+    .create = ext2_create
+};
+
+int ext2fuse(int img, const char *mntp) {
+    int ret = ext2_fs_init(&ctx.fs, img);
+    if (ret < 0) {
+        return ret;
+    }
+
+    char *argv[] = {"ext2fuse", "-f", (char *) mntp, "-o", "max_threads=10", NULL};
+    ret = fuse_main(3, argv, &ext2_ops, NULL);
+
+    ext2_fs_free(ctx.fs);
+    return ret;
 }
