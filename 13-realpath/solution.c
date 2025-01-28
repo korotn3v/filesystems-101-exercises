@@ -8,6 +8,45 @@
 
 #define MAX_FILEPATH_LENGTH 4096
 
+static void normalize_path(char *path) {
+    char *src = path;
+    char *dst = path;
+    char *last = path;
+
+    // Пропускаем начальные слэши
+    while (*src == '/') {
+        src++;
+    }
+
+    while (*src) {
+        // Копируем часть пути до следующего слэша
+        while (*src && *src != '/') {
+            *dst++ = *src++;
+        }
+
+        // Пропускаем все последующие слэши
+        while (*src == '/') {
+            src++;
+        }
+
+        // Добавляем одиночный слэш, если это не конец пути
+        if (*src) {
+            *dst++ = '/';
+        }
+
+        last = dst;
+    }
+
+    // Убедимся, что путь заканчивается нулем
+    *dst = '\0';
+
+    // Если последний символ слэш и это не единственный символ пути,
+    // то убираем его
+    if (last > path + 1 && *(last-1) == '/') {
+        *(last-1) = '\0';
+    }
+}
+
 void abspath(const char *path) {
     char realPath[MAX_FILEPATH_LENGTH] = "/";
     char remainingPath[MAX_FILEPATH_LENGTH];
@@ -110,6 +149,7 @@ void abspath(const char *path) {
                 }
                 memcpy(realPath + realLen, linkPath, linkLen + 1);
             }
+            normalize_path(realPath);
         } else {
             size_t addLen = *start ? 1 : 0;  // для слэша
             if (realLen + compLen + addLen >= MAX_FILEPATH_LENGTH) {
