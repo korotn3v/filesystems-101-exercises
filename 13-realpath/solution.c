@@ -14,18 +14,23 @@ void abspath(const char *path) {
     char componentPath[MAX_FILEPATH_LENGTH];
 
     // Обработка начального пути
-    if (path[0] == '/') {
-        strncpy(remainingPath, path + 1, MAX_FILEPATH_LENGTH - 1);
-    } else {
-        strncpy(remainingPath, path, MAX_FILEPATH_LENGTH - 1);
+    size_t pathLen = strlen(path);
+    if (pathLen >= MAX_FILEPATH_LENGTH) {
+        report_error("/", path, ENAMETOOLONG);
+        return;
     }
-    remainingPath[MAX_FILEPATH_LENGTH - 1] = '\0';
+
+    if (path[0] == '/') {
+        memcpy(remainingPath, path + 1, pathLen);
+    } else {
+        memcpy(remainingPath, path, pathLen + 1);
+    }
 
     char *start = remainingPath;
     char *end;
 
     // Если путь пустой или "/"
-    if (strlen(remainingPath) == 0) {
+    if (!*start) {
         report_path("/");
         return;
     }
@@ -34,13 +39,20 @@ void abspath(const char *path) {
         size_t len;
         if (end) {
             len = end - start;
-            strncpy(componentPath, start, len);
+            if (len >= MAX_FILEPATH_LENGTH) {
+                report_error("/", start, ENAMETOOLONG);
+                return;
+            }
+            memcpy(componentPath, start, len);
             componentPath[len] = '\0';
             start = end + 1;
         } else {
             len = strlen(start);
-            strncpy(componentPath, start, len);
-            componentPath[len] = '\0';
+            if (len >= MAX_FILEPATH_LENGTH) {
+                report_error("/", start, ENAMETOOLONG);
+                return;
+            }
+            memcpy(componentPath, start, len + 1);
             start += len;
         }
 
@@ -59,16 +71,16 @@ void abspath(const char *path) {
         }
 
         char testPath[MAX_FILEPATH_LENGTH];
-        size_t realPathLen = strlen(realPath);
-        size_t componentPathLen = strlen(componentPath);
+        size_t realLen = strlen(realPath);
+        size_t compLen = strlen(componentPath);
 
-        if (realPathLen + componentPathLen + 1 >= MAX_FILEPATH_LENGTH) {
+        if (realLen + compLen >= MAX_FILEPATH_LENGTH) {
             report_error("/", componentPath, ENAMETOOLONG);
             return;
         }
 
-        strcpy(testPath, realPath);
-        strcat(testPath, componentPath);
+        memcpy(testPath, realPath, realLen);
+        memcpy(testPath + realLen, componentPath, compLen + 1);
 
         struct stat sb;
         if (lstat(testPath, &sb) == -1) {
@@ -86,37 +98,44 @@ void abspath(const char *path) {
             linkPath[linkLen] = '\0';
 
             if (linkPath[0] == '/') {
-                if (strlen(linkPath) >= MAX_FILEPATH_LENGTH) {
-                    report_error("/", componentPath, ENAMETOOLONG);
+                if (linkLen >= MAX_FILEPATH_LENGTH) {
+                    report_error("/", linkPath, ENAMETOOLONG);
                     return;
                 }
-                strcpy(realPath, linkPath);
+                memcpy(realPath, linkPath, linkLen + 1);
             } else {
-                if (realPathLen + strlen(linkPath) + 1 >= MAX_FILEPATH_LENGTH) {
-                    report_error("/", componentPath, ENAMETOOLONG);
+                if (realLen + linkLen >= MAX_FILEPATH_LENGTH) {
+                    report_error("/", linkPath, ENAMETOOLONG);
                     return;
                 }
-                strcat(realPath, linkPath);
+                memcpy(realPath + realLen, linkPath, linkLen + 1);
             }
         } else {
-            if (realPathLen + componentPathLen + 2 >= MAX_FILEPATH_LENGTH) {
+            size_t addLen = *start ? 1 : 0;  // для слэша
+            if (realLen + compLen + addLen >= MAX_FILEPATH_LENGTH) {
                 report_error("/", componentPath, ENAMETOOLONG);
                 return;
             }
-            strcat(realPath, componentPath);
-            if (*start) strcat(realPath, "/");
+            memcpy(realPath + realLen, componentPath, compLen);
+            realPath[realLen + compLen] = '\0';
+            if (*start) {
+                realPath[realLen + compLen] = '/';
+                realPath[realLen + compLen + 1] = '\0';
+            }
         }
     }
 
     // Проверка на директорию
     struct stat final_stat;
     if (stat(realPath, &final_stat) == 0 && S_ISDIR(final_stat.st_mode)) {
-        if (realPath[strlen(realPath) - 1] != '/') {
-            if (strlen(realPath) + 1 >= MAX_FILEPATH_LENGTH) {
+        size_t len = strlen(realPath);
+        if (realPath[len - 1] != '/') {
+            if (len + 1 >= MAX_FILEPATH_LENGTH) {
                 report_error("/", realPath, ENAMETOOLONG);
                 return;
             }
-            strcat(realPath, "/");
+            realPath[len] = '/';
+            realPath[len + 1] = '\0';
         }
     }
 
