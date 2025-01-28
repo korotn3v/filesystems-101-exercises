@@ -88,10 +88,8 @@ void abspath(const char* path) {
         }
 
         char copyRealPath[MAX_FILEPATH_LENGTH] = "";
-        strncpy(copyRealPath, realPath, MAX_FILEPATH_LENGTH);
-        copyRealPath[MAX_FILEPATH_LENGTH - 1] = '\0';
-        strncpy(realPath, temporaryPath, MAX_FILEPATH_LENGTH);
-        realPath[MAX_FILEPATH_LENGTH - 1] = '\0';
+        snprintf(copyRealPath, MAX_FILEPATH_LENGTH, "%s", realPath);
+        snprintf(realPath, MAX_FILEPATH_LENGTH, "%s", temporaryPath);
 
         char link[MAX_FILEPATH_LENGTH];
         if (S_ISLNK(path_stat.st_mode)) {
@@ -112,7 +110,7 @@ void abspath(const char* path) {
                 }
                 strcat(link, currentPath);
             }
-            strncpy(currentPath, link, MAX_FILEPATH_LENGTH);
+            snprintf(currentPath, MAX_FILEPATH_LENGTH, "%s", link);
         }
         len = strlen(currentPath);
     }
