@@ -11,74 +11,114 @@
 void abspath(const char *path) {
     char realPath[MAX_FILEPATH_LENGTH] = "/";
     char remainingPath[MAX_FILEPATH_LENGTH];
-    char currentPath[MAX_FILEPATH_LENGTH] = "";
-    char tempPath[MAX_FILEPATH_LENGTH];
+    char componentPath[MAX_FILEPATH_LENGTH];
 
-    // Если путь начинается с '/', копируем его без изменений
+    // Обработка начального пути
     if (path[0] == '/') {
-        snprintf(remainingPath, MAX_FILEPATH_LENGTH, "%s", path + 1);
+        strncpy(remainingPath, path + 1, MAX_FILEPATH_LENGTH - 1);
     } else {
-        // Для относительного пути добавляем текущую директорию '/'
-        snprintf(remainingPath, MAX_FILEPATH_LENGTH, "%s", path);
+        strncpy(remainingPath, path, MAX_FILEPATH_LENGTH - 1);
+    }
+    remainingPath[MAX_FILEPATH_LENGTH - 1] = '\0';
+
+    char *start = remainingPath;
+    char *end;
+
+    // Если путь пустой или "/"
+    if (strlen(remainingPath) == 0) {
+        report_path("/");
+        return;
     }
 
-    // Пока есть путь для обработки
-    while (*remainingPath) {
-        char *slash = strchr(remainingPath, '/');
-        if (slash) {
-            *slash = '\0';  // Разделяем на части
+    while ((end = strchr(start, '/')) != NULL || *start) {
+        size_t len;
+        if (end) {
+            len = end - start;
+            strncpy(componentPath, start, len);
+            componentPath[len] = '\0';
+            start = end + 1;
+        } else {
+            len = strlen(start);
+            strncpy(componentPath, start, len);
+            componentPath[len] = '\0';
+            start += len;
         }
 
-        snprintf(currentPath, MAX_FILEPATH_LENGTH, "%s", remainingPath);
-        snprintf(tempPath, MAX_FILEPATH_LENGTH, "%s%s%s", realPath, *realPath != '/' ? "/" : "", currentPath);
+        if (len == 0 || strcmp(componentPath, ".") == 0) {
+            continue;
+        }
 
-        struct stat path_stat;
-        if (lstat(tempPath, &path_stat) != 0) {
-            // Ошибка при обработке пути
-            report_error(realPath, currentPath, errno);
+        if (strcmp(componentPath, "..") == 0) {
+            char *lastSlash = strrchr(realPath, '/');
+            if (lastSlash != realPath) {
+                *lastSlash = '\0';
+                lastSlash = strrchr(realPath, '/');
+                if (lastSlash) *(lastSlash + 1) = '\0';
+            }
+            continue;
+        }
+
+        char testPath[MAX_FILEPATH_LENGTH];
+        size_t realPathLen = strlen(realPath);
+        size_t componentPathLen = strlen(componentPath);
+
+        if (realPathLen + componentPathLen + 1 >= MAX_FILEPATH_LENGTH) {
+            report_error("/", componentPath, ENAMETOOLONG);
             return;
         }
 
-        if (S_ISLNK(path_stat.st_mode)) {
-            // Обрабатываем символическую ссылку
-            char linkTarget[MAX_FILEPATH_LENGTH];
-            ssize_t len = readlink(tempPath, linkTarget, MAX_FILEPATH_LENGTH - 1);
-            if (len == -1) {
-                report_error(realPath, currentPath, errno);
-                return;
-            }
-            linkTarget[len] = '\0';
+        strcpy(testPath, realPath);
+        strcat(testPath, componentPath);
 
-            if (linkTarget[0] == '/') {
-                // Абсолютный путь в ссылке
-                snprintf(realPath, MAX_FILEPATH_LENGTH, "%s", linkTarget);
-            } else {
-                // Относительный путь в ссылке
-                snprintf(realPath, MAX_FILEPATH_LENGTH, "%s%s%s", realPath, *realPath != '/' ? "/" : "", linkTarget);
-            }
-        } else {
-            // Добавляем текущий компонент к реальному пути
-            snprintf(realPath, MAX_FILEPATH_LENGTH, "%s%s%s", realPath, *realPath != '/' ? "/" : "", currentPath);
+        struct stat sb;
+        if (lstat(testPath, &sb) == -1) {
+            report_error("/", componentPath, ENOENT);
+            return;
         }
 
-        // Добавляем оставшуюся часть пути
-        if (slash) {
-            *slash = '/';
-            snprintf(remainingPath, MAX_FILEPATH_LENGTH, "%s", slash + 1);
+        if (S_ISLNK(sb.st_mode)) {
+            char linkPath[MAX_FILEPATH_LENGTH];
+            ssize_t linkLen = readlink(testPath, linkPath, MAX_FILEPATH_LENGTH - 1);
+            if (linkLen == -1) {
+                report_error(realPath, componentPath, errno);
+                return;
+            }
+            linkPath[linkLen] = '\0';
+
+            if (linkPath[0] == '/') {
+                if (strlen(linkPath) >= MAX_FILEPATH_LENGTH) {
+                    report_error("/", componentPath, ENAMETOOLONG);
+                    return;
+                }
+                strcpy(realPath, linkPath);
+            } else {
+                if (realPathLen + strlen(linkPath) + 1 >= MAX_FILEPATH_LENGTH) {
+                    report_error("/", componentPath, ENAMETOOLONG);
+                    return;
+                }
+                strcat(realPath, linkPath);
+            }
         } else {
-            remainingPath[0] = '\0';
+            if (realPathLen + componentPathLen + 2 >= MAX_FILEPATH_LENGTH) {
+                report_error("/", componentPath, ENAMETOOLONG);
+                return;
+            }
+            strcat(realPath, componentPath);
+            if (*start) strcat(realPath, "/");
         }
     }
 
-    // Проверяем, указывает ли путь на каталог
+    // Проверка на директорию
     struct stat final_stat;
     if (stat(realPath, &final_stat) == 0 && S_ISDIR(final_stat.st_mode)) {
-        size_t len = strlen(realPath);
-        if (realPath[len - 1] != '/') {
+        if (realPath[strlen(realPath) - 1] != '/') {
+            if (strlen(realPath) + 1 >= MAX_FILEPATH_LENGTH) {
+                report_error("/", realPath, ENAMETOOLONG);
+                return;
+            }
             strcat(realPath, "/");
         }
     }
 
-    // Отчёт о результате
     report_path(realPath);
 }
