@@ -1,4 +1,4 @@
-#include <solution.h>
+#include "solution.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,7 +7,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#define MAX_FILEPATH_LENGTH 4096 // In linux, the maximum path length is 255 bytes
+#define MAX_FILEPATH_LENGTH 4096 // В Linux максимальная длина пути 4096 байт
 
 char* giveFirstPtr(const char* str, char symbol) {
     while (*str != '\0') {
@@ -33,14 +33,16 @@ char* giveLastPtr(const char* str, char symbol) {
 void undoPath(char* realPath) {
     if (strlen(realPath) > 1) {
         char* last = giveLastPtr(realPath, '/');
-        *last = '\0';
+        if (last) {
+            *last = '\0';
+        }
     }
 }
 
 void abspath(const char* path) {
-
     char currentPath[MAX_FILEPATH_LENGTH] = "";
 
+    // Если путь абсолютный, убираем начальный '/'
     if (path[0] == '/') {
         snprintf(currentPath, MAX_FILEPATH_LENGTH, "%s", path + 1);
     } else {
@@ -52,7 +54,6 @@ void abspath(const char* path) {
     char piecePath[MAX_FILEPATH_LENGTH] = "";
 
     while (len > 0) {
-
         char* ptrPiecePath = giveFirstPtr(currentPath, '/');
 
         if (ptrPiecePath) {
@@ -74,11 +75,16 @@ void abspath(const char* path) {
             continue;
         }
 
-        strcat(realPath, "/");
+        // Добавляем текущий кусок пути в реальный путь
+        if (strlen(realPath) + strlen(piecePath) + 2 >= MAX_FILEPATH_LENGTH) {
+            fprintf(stderr, "Path is too long\n");
+            exit(EXIT_FAILURE);
+        }
+        strncat(realPath, "/", MAX_FILEPATH_LENGTH - strlen(realPath) - 1);
+        strncat(realPath, piecePath, MAX_FILEPATH_LENGTH - strlen(realPath) - 1);
 
-        char temporaryPath[MAX_FILEPATH_LENGTH * 2] = "";
-
-        snprintf(temporaryPath, MAX_FILEPATH_LENGTH * 2, "%s%s", realPath, piecePath);
+        char temporaryPath[MAX_FILEPATH_LENGTH] = "";
+        snprintf(temporaryPath, MAX_FILEPATH_LENGTH, "%s", realPath);
 
         struct stat path_stat;
         if (lstat(temporaryPath, &path_stat) != 0) {
@@ -87,28 +93,30 @@ void abspath(const char* path) {
             return;
         }
 
-        char copyRealPath[MAX_FILEPATH_LENGTH] = "";
-        snprintf(copyRealPath, MAX_FILEPATH_LENGTH, "%s", realPath);
-        snprintf(realPath, MAX_FILEPATH_LENGTH, "%s", temporaryPath);
-
         char link[MAX_FILEPATH_LENGTH];
         if (S_ISLNK(path_stat.st_mode)) {
-            int lenLink;
-            if ((lenLink = readlink(realPath, link, MAX_FILEPATH_LENGTH - 1)) == -1) {
-                report_error(copyRealPath, piecePath, errno);
+            int lenLink = readlink(temporaryPath, link, MAX_FILEPATH_LENGTH - 1);
+            if (lenLink == -1) {
+                report_error(realPath, piecePath, errno);
                 return;
             }
             link[lenLink] = '\0';
+
             if (link[0] == '/') {
                 realPath[0] = '\0';
             } else {
                 undoPath(realPath);
             }
+
+            if (strlen(link) + strlen(currentPath) + 2 >= MAX_FILEPATH_LENGTH) {
+                fprintf(stderr, "Path is too long\n");
+                exit(EXIT_FAILURE);
+            }
             if (strlen(currentPath) > 0) {
                 if (link[lenLink - 1] != '/') {
-                    strcat(link, "/");
+                    strncat(link, "/", MAX_FILEPATH_LENGTH - strlen(link) - 1);
                 }
-                strcat(link, currentPath);
+                strncat(link, currentPath, MAX_FILEPATH_LENGTH - strlen(link) - 1);
             }
             snprintf(currentPath, MAX_FILEPATH_LENGTH, "%s", link);
         }
@@ -121,7 +129,7 @@ void abspath(const char* path) {
     if (strlen(realPath) == 0 || S_ISDIR(path_stat.st_mode)) {
         size_t len = strlen(realPath);
         if (realPath[len - 1] != '/') {
-            strcat(realPath, "/");
+            strncat(realPath, "/", MAX_FILEPATH_LENGTH - strlen(realPath) - 1);
         }
     }
     report_path(realPath);
